@@ -32,7 +32,7 @@ jobs:
               run: npm ci --ignore-scripts
             - name: Build host
               working-directory: host
-              run: npm run build
+              run: npm run hydrate:model-data && npm run build:offline
             - name: Test all 20 cases (native checkpoint API required)
               working-directory: extension
               shell: bash
