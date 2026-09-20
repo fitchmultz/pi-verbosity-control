@@ -78,6 +78,18 @@ Example:
 
 If you edit the file manually while Pi is already running, use `/reload`.
 
+## Working-session checkpoints
+
+On Pi hosts supporting the optional native `session_checkpoint` event, the extension verifies that the existing config file reconstructs its active settings before allowing sleep. Native dispatch already waits for startup and shortcut callbacks; checkpointing does not run shutdown or rewrite the file.
+
+External edits that differ from active settings, malformed JSON, and read errors keep sleep readiness false. Use `/reload` after reconciling the file. A missing file qualifies only when the active settings are the defaults. The archive owner must still preserve `~/.pi/agent/verbosity.json` and freeze external filesystem writers during capture.
+
+Hosts without this event retain normal behavior. Footer cleanup still runs on shutdown/reload.
+
+## Tests
+
+Run the existing `index.test.ts` with Vitest and the Pi peer packages available. The native checkpoint integration cases automatically skip on hosts without `AgentSession.acquireCheckpoint`; on a supporting host they use isolated files and synthetic configuration, without model requests. Launch tests with an isolated `HOME` and `PI_CODING_AGENT_DIR` and `PI_OFFLINE=1`.
+
 ## Notes
 
 - The optional footer indicator uses a runtime monkeypatch of Pi's built-in `FooterComponent`, not a public footer-composition API.

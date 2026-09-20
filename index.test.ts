@@ -3,10 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { FooterComponent } from "@earendil-works/pi-coding-agent";
+import * as sdk from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+    default as verbosityControlExtension,
     buildFooterRightSideCandidates,
     cycleVerbosity,
     getExactModelKey,
@@ -261,6 +264,207 @@ function createContext(model: Model<Api>): {
         notifyMock,
     };
 }
+
+// These integration tests run only on hosts with the additive native checkpoint API.
+// No provider calls: use an empty credential store, disable discovery/network, and
+// invoke the existing request hook with a synthetic payload to observe active state.
+describe.skipIf(!("acquireCheckpoint" in sdk.AgentSession.prototype))("native checkpoints", () => {
+    async function start(checkpoint?: sdk.SessionCheckpoint) {
+        const cwd = path.join(testHome, "workspace");
+        const agentDir = path.join(testHome, ".pi", "agent");
+        await mkdir(cwd, { recursive: true });
+        const settingsManager = sdk.SettingsManager.inMemory({
+            compaction: { enabled: false }, retry: { enabled: false },
+        });
+        const resourceLoader = new sdk.DefaultResourceLoader({
+            cwd, agentDir, settingsManager,
+            noExtensions: true, noSkills: true, noPromptTemplates: true,
+            noThemes: true, noContextFiles: true,
+            extensionFactories: [{ name: "verbosity-control", factory: verbosityControlExtension }],
+        });
+        await resourceLoader.reload();
+        const model = createModel({ provider: "checkpoint-test", api: "openai-responses", baseUrl: "http://127.0.0.1:1" });
+        const modelsPath = path.join(agentDir, "models.json");
+        await mkdir(agentDir, { recursive: true });
+        await writeFile(modelsPath, JSON.stringify({ providers: { "checkpoint-test": {
+            baseUrl: model.baseUrl, api: model.api, apiKey: "synthetic-not-a-credential", models: [model],
+        } } }));
+        const modelRuntime = await sdk.ModelRuntime.create({
+            credentials: new InMemoryCredentialStore(), modelsPath,
+            allowModelNetwork: false, refreshOnCreate: false,
+        });
+        const { session } = await sdk.createAgentSession({
+            cwd, agentDir, settingsManager, resourceLoader, modelRuntime,
+            model, tools: [], checkpoint,
+        });
+        await session.bindExtensions({ onError: (error) => { throw new Error(error.error); } });
+        return session;
+    }
+
+    async function close(session: sdk.AgentSession) {
+        session.cancelCheckpoint();
+        await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+        session.dispose();
+    }
+
+    async function receipt(session: sdk.AgentSession) {
+        const hold = await session.acquireCheckpoint({
+            quiesce: () => () => {}, signal: AbortSignal.timeout(2000),
+        });
+        try {
+            return { sleepReady: hold.sleepReady, blockers: hold.sleepBlockers, checkpoint: hold.checkpoint };
+        } finally {
+            hold.release();
+        }
+    }
+
+    async function shortcut(session: sdk.AgentSession, toggle = false) {
+        const key = process.platform === "darwin"
+            ? (toggle ? "alt+shift+v" : "alt+v")
+            : (toggle ? "ctrl+alt+shift+v" : "ctrl+alt+v");
+        const handler = session.extensionRunner.getShortcuts({}).get(key)!.handler;
+        // Use native callback ownership, as an SDK host must for shortcut dispatch.
+        return session.extensionRunner.checkpointActivity.run(() => handler(session.extensionRunner.createContext()));
+    }
+
+    async function activeVerbosity(session: sdk.AgentSession) {
+        const payload = await session.extensionRunner.emitBeforeProviderRequest({ text: { format: "plain" } });
+        return (payload as { text: { verbosity?: string } }).text.verbosity;
+    }
+
+    function footer(session: sdk.AgentSession) {
+        sdk.initTheme("dark");
+        return new FooterComponent(session, {
+            getGitBranch: () => null, getExtensionStatuses: () => new Map(),
+            getAvailableProviderCount: () => 1, onBranchChange: () => () => {},
+        }).render(160).join("\n");
+    }
+
+    it("qualifies persisted idle state and reconstructs verbosity and indicator from the existing file", async () => {
+        await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
+        const originalRender = FooterComponent.prototype.render;
+        const session = await start();
+        let checkpoint: sdk.SessionCheckpoint;
+        try {
+            await shortcut(session);
+            await shortcut(session, true);
+            expect(await activeVerbosity(session)).toBe("medium");
+            expect(footer(session)).toContain("🗣  medium");
+            const before = await readFile(path.join(testHome, ".pi/agent/verbosity.json"), "utf8");
+            const result = await receipt(session);
+            expect(result.blockers).toEqual([]);
+            expect(result.sleepReady).toBe(true);
+            expect(await readFile(path.join(testHome, ".pi/agent/verbosity.json"), "utf8")).toBe(before);
+            checkpoint = result.checkpoint;
+        } finally { await close(session); }
+        expect(FooterComponent.prototype.render).toBe(originalRender);
+        const restored = await start(checkpoint!);
+        try {
+            expect(await activeVerbosity(restored)).toBe("medium");
+            expect(footer(restored)).toContain("🗣  medium");
+            expect((await receipt(restored)).sleepReady).toBe(true);
+        } finally { await close(restored); }
+        expect(FooterComponent.prototype.render).toBe(originalRender);
+    });
+
+    it("does not certify divergent, truncated, missing, or unreadable nondefault config", async () => {
+        const config = { showIndicator: true, models: { "gpt-5.4": "high" as const } };
+        await saveConfig(config);
+        const session = await start();
+        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        try {
+            for (const changed of [JSON.stringify({ ...config, showIndicator: false }),
+                JSON.stringify({ ...config, models: { "gpt-5.4": "low" } }), '{"models":']) {
+                await writeFile(file, changed);
+                const result = await receipt(session);
+                expect(result.sleepReady).toBe(false);
+                expect(result.blockers.join()).toContain("Verbosity config");
+                expect(await readFile(file, "utf8")).toBe(changed);
+                expect(await activeVerbosity(session)).toBe("high");
+            }
+            await rm(file);
+            expect((await receipt(session)).sleepReady).toBe(false);
+            await mkdir(file);
+            expect((await receipt(session)).sleepReady).toBe(false);
+            await rm(file, { recursive: true });
+            await saveConfig(config);
+            expect((await receipt(session)).sleepReady).toBe(true);
+        } finally { await close(session); }
+    });
+
+    it("accepts missing defaults and semantic equality but not malformed fallback defaults", async () => {
+        const session = await start();
+        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        try {
+            expect((await receipt(session)).sleepReady).toBe(true);
+            await mkdir(path.dirname(file), { recursive: true });
+            await writeFile(file, "{");
+            expect((await receipt(session)).sleepReady).toBe(false);
+            await writeFile(file, '{"models": {}, "showIndicator": false, "ignored": true}');
+            expect((await receipt(session)).sleepReady).toBe(true);
+        } finally { await close(session); }
+    });
+
+    it("reload reconciles an external edit and retains footer teardown", async () => {
+        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high", "another-model": "low" } });
+        const originalRender = FooterComponent.prototype.render;
+        const session = await start();
+        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        try {
+            await writeFile(file, '{"models":{"another-model":"LOW","gpt-5.4":"HIGH"},"showIndicator":true}');
+            expect((await receipt(session)).sleepReady).toBe(true);
+            const changed = '{"showIndicator":false,"models":{"gpt-5.4":"low"}}';
+            await writeFile(file, changed);
+            expect((await receipt(session)).sleepReady).toBe(false);
+            expect(footer(session)).toContain("🗣  high");
+            await session.reload();
+            expect(await activeVerbosity(session)).toBe("low");
+            expect(FooterComponent.prototype.render).toBe(originalRender);
+            expect(footer(session)).not.toContain("🗣");
+            expect((await receipt(session)).sleepReady).toBe(true);
+            expect(await readFile(file, "utf8")).toBe(changed);
+        } finally { await close(session); }
+    });
+
+    it("keeps failed shortcut writes out of active state and blocks unrecoverable file state", async () => {
+        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high" } });
+        const session = await start();
+        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        try {
+            await rm(file);
+            await mkdir(file); // Real EISDIR failure, not mocked saveConfig.
+            await shortcut(session);
+            await shortcut(session, true);
+            expect(await activeVerbosity(session)).toBe("high");
+            expect(footer(session)).toContain("🗣  high");
+            expect((await receipt(session)).sleepReady).toBe(false);
+        } finally { await close(session); }
+    });
+
+    it("native ownership defers acquisition until the returned callback has finished", async () => {
+        await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
+        const session = await start();
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => { finish = resolve; });
+        const callback = session.extensionRunner.checkpointActivity.run(async () => {
+            await shortcut(session);
+            await gate;
+        });
+        try {
+            const cancel = new AbortController();
+            const pending = session.acquireCheckpoint({ quiesce: () => () => {}, signal: cancel.signal });
+            let acquired = false;
+            void pending.then(() => { acquired = true; }, () => {});
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            expect(acquired).toBe(false);
+            cancel.abort();
+            await expect(pending).rejects.toThrow("Checkpoint cancelled");
+            finish();
+            await callback;
+            expect((await receipt(session)).sleepReady).toBe(true);
+        } finally { finish(); await callback; await close(session); }
+    });
+});
 
 describe("pi-verbosity-control runtime", () => {
     it("patches requests for configured models after session start", async () => {

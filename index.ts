@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, FooterComponent } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
@@ -368,6 +369,30 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
 
     pi.on("session_shutdown", async () => {
         unpatchFooterRender();
+    });
+
+    // Additive native event: older upstream hosts accept the registration but
+    // never emit it. Keep the local signature compatible with their API types.
+    const onCheckpoint = pi.on as unknown as (event: "session_checkpoint", handler: () => Promise<{
+        sleepReady: boolean;
+        reason?: string;
+    }>) => unknown;
+    onCheckpoint("session_checkpoint", async () => {
+        // Native ownership already joins startup/shortcut callbacks and holds
+        // ingress. No detached writers live here; verify the existing file, not
+        // loadConfig's error fallback, and never overwrite an external edit.
+        let persisted: VerbosityConfig;
+        try {
+            persisted = parseConfig(JSON.parse(await readFile(getGlobalConfigPath(), "utf8")));
+        } catch (error) {
+            if ((error as { code?: string }).code !== "ENOENT") {
+                return { sleepReady: false, reason: "Verbosity config could not be read or parsed" };
+            }
+            persisted = createDefaultConfig();
+        }
+        return isDeepStrictEqual(persisted, activeConfig)
+            ? { sleepReady: true }
+            : { sleepReady: false, reason: "Verbosity config differs from active settings; reload to reconcile" };
     });
 
     pi.on("before_provider_request", (event, ctx) => {
