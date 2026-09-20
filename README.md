@@ -88,7 +88,26 @@ Hosts without this event retain normal behavior. Footer cleanup still runs on sh
 
 ## Tests
 
-Run the existing `index.test.ts` with Vitest and the Pi peer packages available. The native checkpoint integration cases automatically skip on hosts without `AgentSession.acquireCheckpoint`; on a supporting host they use isolated files and synthetic configuration, without model requests. Launch tests with an isolated `HOME` and `PI_CODING_AGENT_DIR` and `PI_OFFLINE=1`.
+The `native-checkpoints` CI job runs all **14 existing + 6 native checkpoint cases** against `fitchmultz/pi` source commit `fbc12ed1ae9d8e21abfe99323e18702d71518ec4` (Pi 0.86.0), using Node 26.9.0 and that host's locked Vitest 4.1.9. It installs/builds the host normally; this extension needs no separate test dependency installation or lockfile.
+
+To reproduce, prepare a separate checkout of that exact host commit with `npm ci --ignore-scripts` and `npm run build`, then run from this extension directory (Bash, Node 26.9.0 on PATH):
+
+```bash
+host=/absolute/path/to/pi-source
+node=$(command -v node)
+fixture=$(mktemp -d /tmp/verbosity-ci.XXXXXX)
+trap 'rm -rf "$fixture"' EXIT
+mkdir -p "$fixture/home" "$fixture/tmp"
+env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
+    PI_CODING_AGENT_DIR="$fixture/home/.pi/agent" \
+    PI_OFFLINE=1 PI_TELEMETRY=0 PI_HOST_ROOT="$host" PI_REQUIRE_CHECKPOINT=1 \
+    "$node" "$host/node_modules/vitest/vitest.mjs" run \
+    --config vitest.config.mjs --configLoader native --reporter verbose
+```
+
+`PI_HOST_ROOT` selects the built source host for the portable SDK/Vitest aliases. An existing built host can be used read-only. The host build may fetch public model metadata; the tests themselves use synthetic configuration and isolated files, disable discovery/network refresh, and make no model requests. `PI_REQUIRE_CHECKPOINT=1` fails if the native API is missing rather than reporting a successful skip. Outside this designated lane, omit that flag to retain intentional skipping of the six native cases on hosts without `AgentSession.acquireCheckpoint`.
+
+This lane qualifies the pinned native runtime only. The separate official Pi 0.86.1 production-source declaration check is not an official-runtime qualification.
 
 ## Notes
 

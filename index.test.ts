@@ -265,10 +265,14 @@ function createContext(model: Model<Api>): {
     };
 }
 
-// These integration tests run only on hosts with the additive native checkpoint API.
+// Optional on older hosts, mandatory in the designated native CI lane.
+const hasCheckpoint = typeof sdk.AgentSession.prototype.acquireCheckpoint === "function";
+if (process.env.PI_REQUIRE_CHECKPOINT === "1" && !hasCheckpoint) {
+    throw new Error("PI_REQUIRE_CHECKPOINT=1 requires AgentSession.acquireCheckpoint; native tests must not skip");
+}
 // No provider calls: use an empty credential store, disable discovery/network, and
 // invoke the existing request hook with a synthetic payload to observe active state.
-describe.skipIf(!("acquireCheckpoint" in sdk.AgentSession.prototype))("native checkpoints", () => {
+describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
     async function start(checkpoint?: sdk.SessionCheckpoint) {
         const cwd = path.join(testHome, "workspace");
         const agentDir = path.join(testHome, ".pi", "agent");
