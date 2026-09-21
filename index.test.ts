@@ -22,11 +22,15 @@ import {
 } from "./index.js";
 
 const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
+const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 let testHome = "";
 
 beforeAll(async () => {
     testHome = await mkdtemp(path.join(os.tmpdir(), "pi-verbosity-control-test-"));
     process.env.HOME = testHome;
+    process.env.USERPROFILE = testHome;
+    process.env.PI_CODING_AGENT_DIR = path.join(testHome, ".pi", "agent");
 });
 
 beforeEach(async () => {
@@ -36,10 +40,11 @@ beforeEach(async () => {
 afterAll(async () => {
     await rm(testHome, { recursive: true, force: true });
 
-    if (originalHome === undefined) {
-        delete process.env.HOME;
-    } else {
-        process.env.HOME = originalHome;
+    for (const [key, value] of Object.entries({
+        HOME: originalHome, USERPROFILE: originalUserProfile, PI_CODING_AGENT_DIR: originalAgentDir,
+    })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
     }
 });
 
@@ -267,12 +272,11 @@ function createContext(model: Model<Api>): {
 
 // Optional on older hosts, mandatory in the designated native CI lane.
 const hasCheckpoint = typeof sdk.AgentSession.prototype.acquireCheckpoint === "function";
-if (process.env.PI_REQUIRE_CHECKPOINT === "1" && !hasCheckpoint) {
-    throw new Error("PI_REQUIRE_CHECKPOINT=1 requires AgentSession.acquireCheckpoint; native tests must not skip");
+if ((process.env.PI_COMPAT_HOST === "fork" || process.env.PI_REQUIRE_CHECKPOINT === "1") && !hasCheckpoint) {
+    throw new Error("Fork qualification requires AgentSession.acquireCheckpoint; native tests must not skip");
 }
 // No provider calls: use an empty credential store, disable discovery/network, and
 // invoke the existing request hook with a synthetic payload to observe active state.
-describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
     async function start(checkpoint?: sdk.SessionCheckpoint) {
         const cwd = path.join(testHome, "workspace");
         const agentDir = path.join(testHome, ".pi", "agent");
@@ -306,7 +310,7 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
     }
 
     async function close(session: sdk.AgentSession) {
-        session.cancelCheckpoint();
+        session.cancelCheckpoint?.();
         await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
         session.dispose();
     }
@@ -344,6 +348,33 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
         }).render(160).join("\n");
     }
 
+describe("native official/fork baseline", () => {
+    it("patches native requests, renders the stock footer, and reconciles config on reload", async () => {
+        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "low" } });
+        const originalRender = FooterComponent.prototype.render;
+        const session = await start();
+        try {
+            const payload = await session.extensionRunner.emitBeforeProviderRequest({ text: { format: "plain" } });
+            expect(payload).toEqual({ text: { format: "plain", verbosity: "low" } });
+            expect(footer(session)).toContain("🗣  low");
+            for (const width of [40, 80, 160]) {
+                const component = new FooterComponent(session, {
+                    getGitBranch: () => null, getExtensionStatuses: () => new Map(),
+                    getAvailableProviderCount: () => 1, onBranchChange: () => () => {},
+                });
+                expect(component.render(width).every((line) => visibleWidth(line) <= width)).toBe(true);
+            }
+            await saveConfig({ showIndicator: false, models: { "gpt-5.4": "high" } });
+            await session.reload();
+            expect(await activeVerbosity(session)).toBe("high");
+            expect(footer(session)).not.toContain("🗣");
+            expect(FooterComponent.prototype.render).toBe(originalRender);
+        } finally { await close(session); }
+        expect(FooterComponent.prototype.render).toBe(originalRender);
+    });
+});
+
+describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
     it("qualifies persisted idle state and reconstructs verbosity and indicator from the existing file", async () => {
         await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
         const originalRender = FooterComponent.prototype.render;

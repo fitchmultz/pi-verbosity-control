@@ -1,49 +1,42 @@
-name: Check
+name: Node 26
 
 on:
-    push:
-        branches: [main]
-    pull_request:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 
 permissions:
-    contents: read
+  contents: read
 
+concurrency:
+  group: node26-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Distinct forward-Node qualification; shared CI owns Node 22.19/24 and the fork.
 jobs:
-    native-checkpoints:
-        runs-on: ubuntu-latest
-        timeout-minutes: 20
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  path: extension
-                  persist-credentials: false
-            - name: Checkout pinned native Pi source host
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  repository: fitchmultz/pi
-                  ref: fbc12ed1ae9d8e21abfe99323e18702d71518ec4
-                  path: host
-                  persist-credentials: false
-            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-              with:
-                  node-version: "26.9.0"
-            - name: Install host's locked dependencies
-              working-directory: host
-              run: npm ci --ignore-scripts
-            - name: Build host
-              working-directory: host
-              run: npm run hydrate:model-data && npm run build:offline
-            - name: Test all 20 cases (native checkpoint API required)
-              working-directory: extension
-              shell: bash
-              run: |
-                  fixture=$(mktemp -d /tmp/verbosity-ci.XXXXXX)
-                  trap 'rm -rf "$fixture"' EXIT
-                  mkdir -p "$fixture/home" "$fixture/tmp"
-                  node=$(command -v node)
-                  host="$GITHUB_WORKSPACE/host"
-                  env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
-                      PI_CODING_AGENT_DIR="$fixture/home/.pi/agent" \
-                      PI_OFFLINE=1 PI_TELEMETRY=0 PI_HOST_ROOT="$host" PI_REQUIRE_CHECKPOINT=1 \
-                      "$node" "$host/node_modules/vitest/vitest.mjs" run \
-                      --config vitest.config.mjs --configLoader native --reporter verbose
+  node26:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26.9.0'
+          cache: npm
+      - name: Install native test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fd-find ripgrep
+          sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check the locked local official graph on Node 26
+        shell: bash
+        run: |
+          fixture="$(mktemp -d /tmp/pi-node26.XXXXXX)"
+          mkdir -p "$fixture/home" "$fixture/agent" "$fixture/tmp"
+          env -i PATH="$PATH" HOME="$fixture/home" USERPROFILE="$fixture/home" \
+            TMPDIR="$fixture/tmp" PI_CODING_AGENT_DIR="$fixture/agent" \
+            PI_OFFLINE=1 PI_TELEMETRY=0 PI_COMPAT_HOST=official npm run check:compat

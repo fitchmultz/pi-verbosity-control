@@ -29,6 +29,19 @@
         "@earendil-works/pi-coding-agent": "*",
         "@earendil-works/pi-tui": "*"
     },
+    "scripts": {
+        "test": "vitest run --configLoader native",
+        "typecheck": "tsc --noEmit",
+        "check:compat": "npm run typecheck && npm test"
+    },
+    "devDependencies": {
+        "@earendil-works/pi-ai": "0.86.1",
+        "@earendil-works/pi-coding-agent": "0.86.1",
+        "@earendil-works/pi-tui": "0.86.1",
+        "@types/node": "24.12.4",
+        "typescript": "5.9.3",
+        "vitest": "4.1.9"
+    },
     "piRelease": {
         "repo": "ferologics/pi-verbosity-control",
         "branch": "main",
