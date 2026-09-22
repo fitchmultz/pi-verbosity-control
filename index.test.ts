@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -495,8 +495,9 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
         const session = await start();
         const file = path.join(sdk.getAgentDir(), "verbosity.json");
         try {
-            await rm(file);
-            await mkdir(file); // Real EISDIR failure, not mocked saveConfig.
+            // Keep the fixture transition in one turn: a real deletion would reset settings before EISDIR.
+            rmSync(file);
+            mkdirSync(file); // Real EISDIR failure, not mocked saveConfig.
             await shortcut(session);
             await shortcut(session, true);
             expect(await activeVerbosity(session)).toBe("high");
