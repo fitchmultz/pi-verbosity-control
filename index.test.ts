@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -9,11 +10,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-    default as verbosityControlExtension,
-    buildFooterRightSideCandidates,
     cycleVerbosity,
     getExactModelKey,
-    injectVerbosityIntoFooterLine,
     loadConfig,
     patchPayloadVerbosity,
     resolveConfiguredVerbosity,
@@ -30,10 +28,11 @@ beforeAll(async () => {
     testHome = await mkdtemp(path.join(os.tmpdir(), "pi-verbosity-control-test-"));
     process.env.HOME = testHome;
     process.env.USERPROFILE = testHome;
-    process.env.PI_CODING_AGENT_DIR = path.join(testHome, ".pi", "agent");
+    process.env.PI_CODING_AGENT_DIR = path.join(testHome, "agent-config");
 });
 
 beforeEach(async () => {
+    await rm(sdk.getAgentDir(), { recursive: true, force: true });
     await rm(path.join(testHome, ".pi"), { recursive: true, force: true });
 });
 
@@ -110,28 +109,7 @@ describe("pi-verbosity-control helpers", () => {
         });
     });
 
-    it("builds footer candidates with and without provider prefix", () => {
-        expect(buildFooterRightSideCandidates(createModel(), "xhigh")).toEqual([
-            "(openai-codex) gpt-5.4 • xhigh",
-            "gpt-5.4 • xhigh",
-        ]);
-    });
 
-    it("injects verbosity into the footer line by consuming padding", () => {
-        const line = "↑1.2k ↓3.4k          (openai-codex) gpt-5.4 • xhigh";
-
-        expect(injectVerbosityIntoFooterLine(line, createModel(), "xhigh", "low")).toBe(
-            "↑1.2k ↓3.4k (openai-codex) gpt-5.4 • xhigh • 🗣  low",
-        );
-    });
-
-    it("keeps the footer width stable when space is tight", () => {
-        const line = "stats  gpt-5.4 • xhigh";
-        const nextLine = injectVerbosityIntoFooterLine(line, createModel(), "xhigh", "low");
-
-        expect(visibleWidth(nextLine)).toBe(visibleWidth(line));
-        expect(nextLine).toContain("gpt-5.4 • xhigh •");
-    });
 });
 
 describe("pi-verbosity-control config io", () => {
@@ -149,7 +127,8 @@ describe("pi-verbosity-control config io", () => {
 
         await saveConfig(config);
 
-        const raw = await readFile(path.join(testHome, ".pi", "agent", "verbosity.json"), "utf8");
+        await expect(readFile(path.join(testHome, ".pi/agent/verbosity.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+        const raw = await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8");
         expect(raw).toBe(`{
     "showIndicator": false,
     "models": {
@@ -159,7 +138,7 @@ describe("pi-verbosity-control config io", () => {
     });
 
     it("ignores invalid config values and keeps valid ones", async () => {
-        const configPath = path.join(testHome, ".pi", "agent", "verbosity.json");
+        const configPath = path.join(sdk.getAgentDir(), "verbosity.json");
         await mkdir(path.dirname(configPath), { recursive: true });
         await writeFile(
             configPath,
@@ -198,6 +177,7 @@ async function createRuntime(config: VerbosityConfig) {
 
     let sessionStartHandler: ((event: unknown, ctx: TestContext) => Promise<void> | void) | undefined;
     let sessionShutdownHandler: ((event: unknown, ctx: TestContext) => Promise<void> | void) | undefined;
+    let modelSelectHandler: ((event: unknown, ctx: TestContext) => Promise<void> | void) | undefined;
     let beforeProviderRequestHandler: ((event: { payload: unknown }, ctx: TestContext) => unknown) | undefined;
     const shortcutHandlers = new Map<string, (ctx: TestContext) => Promise<void> | void>();
 
@@ -208,6 +188,9 @@ async function createRuntime(config: VerbosityConfig) {
             }
             if (event === "session_shutdown") {
                 sessionShutdownHandler = handler;
+            }
+            if (event === "model_select") {
+                modelSelectHandler = handler;
             }
             if (event === "before_provider_request") {
                 beforeProviderRequestHandler = handler as (event: { payload: unknown }, ctx: TestContext) => unknown;
@@ -238,6 +221,10 @@ async function createRuntime(config: VerbosityConfig) {
     return {
         sessionStartHandler,
         sessionShutdownHandler,
+        modelSelectHandler: (event: unknown, ctx: TestContext) => {
+            if (!modelSelectHandler) throw new Error("Missing model_select handler");
+            return modelSelectHandler(event, ctx);
+        },
         beforeProviderRequestHandler,
         cycleShortcutHandler,
         toggleIndicatorShortcutHandler,
@@ -249,6 +236,7 @@ type TestContext = {
     model: Model<Api> | undefined;
     ui: {
         notify: (message: string, level?: string) => void;
+        setStatus: (key: string, value: string | undefined) => void;
     };
 };
 
@@ -264,6 +252,7 @@ function createContext(model: Model<Api>): {
             model,
             ui: {
                 notify: notifyMock,
+                setStatus: vi.fn(),
             },
         },
         notifyMock,
@@ -275,11 +264,13 @@ const hasCheckpoint = typeof sdk.AgentSession.prototype.acquireCheckpoint === "f
 if ((process.env.PI_COMPAT_HOST === "fork" || process.env.PI_REQUIRE_CHECKPOINT === "1") && !hasCheckpoint) {
     throw new Error("Fork qualification requires AgentSession.acquireCheckpoint; native tests must not skip");
 }
+const nativeStatuses = new WeakMap<sdk.AgentSession, Map<string, string>>();
+
 // No provider calls: use an empty credential store, disable discovery/network, and
 // invoke the existing request hook with a synthetic payload to observe active state.
     async function start(checkpoint?: sdk.SessionCheckpoint) {
         const cwd = path.join(testHome, "workspace");
-        const agentDir = path.join(testHome, ".pi", "agent");
+        const agentDir = sdk.getAgentDir();
         await mkdir(cwd, { recursive: true });
         const settingsManager = sdk.SettingsManager.inMemory({
             compaction: { enabled: false }, retry: { enabled: false },
@@ -288,9 +279,11 @@ if ((process.env.PI_COMPAT_HOST === "fork" || process.env.PI_REQUIRE_CHECKPOINT 
             cwd, agentDir, settingsManager,
             noExtensions: true, noSkills: true, noPromptTemplates: true,
             noThemes: true, noContextFiles: true,
-            extensionFactories: [{ name: "verbosity-control", factory: verbosityControlExtension }],
+            additionalExtensionPaths: [path.resolve("index.ts")],
         });
         await resourceLoader.reload();
+        expect(resourceLoader.getExtensions().errors).toEqual([]);
+        expect(resourceLoader.getExtensions().extensions).toHaveLength(1);
         const model = createModel({ provider: "checkpoint-test", api: "openai-responses", baseUrl: "http://127.0.0.1:1" });
         const modelsPath = path.join(agentDir, "models.json");
         await mkdir(agentDir, { recursive: true });
@@ -305,7 +298,19 @@ if ((process.env.PI_COMPAT_HOST === "fork" || process.env.PI_REQUIRE_CHECKPOINT 
             cwd, agentDir, settingsManager, resourceLoader, modelRuntime,
             model, tools: [], checkpoint,
         });
-        await session.bindExtensions({ onError: (error) => { throw new Error(error.error); } });
+        const statuses = new Map<string, string>();
+        nativeStatuses.set(session, statuses);
+        await session.bindExtensions({
+            mode: "tui",
+            uiContext: {
+                ...session.extensionRunner.createContext().ui,
+                setStatus: (key, value) => {
+                    if (value === undefined) statuses.delete(key);
+                    else statuses.set(key, value);
+                },
+            },
+            onError: (error) => { throw new Error(error.error); },
+        });
         return session;
     }
 
@@ -343,27 +348,34 @@ if ((process.env.PI_COMPAT_HOST === "fork" || process.env.PI_REQUIRE_CHECKPOINT 
     function footer(session: sdk.AgentSession) {
         sdk.initTheme("dark");
         return new FooterComponent(session, {
-            getGitBranch: () => null, getExtensionStatuses: () => new Map(),
+            getGitBranch: () => null, getExtensionStatuses: () => nativeStatuses.get(session)!,
             getAvailableProviderCount: () => 1, onBranchChange: () => () => {},
         }).render(160).join("\n");
     }
 
 describe("native official/fork baseline", () => {
-    it("patches native requests, renders the stock footer, and reconciles config on reload", async () => {
+    it("loads through the native loader, publishes stock-footer status, and reconciles config on reload", async () => {
         await saveConfig({ showIndicator: true, models: { "gpt-5.4": "low" } });
         const originalRender = FooterComponent.prototype.render;
         const session = await start();
         try {
             const payload = await session.extensionRunner.emitBeforeProviderRequest({ text: { format: "plain" } });
             expect(payload).toEqual({ text: { format: "plain", verbosity: "low" } });
-            expect(footer(session)).toContain("🗣  low");
+            expect(nativeStatuses.get(session)?.get("verbosity")).toBe("🗣  low");
+            expect(FooterComponent.prototype.render).toBe(originalRender);
+            expect(footer(session)).toContain("🗣 low");
             for (const width of [40, 80, 160]) {
                 const component = new FooterComponent(session, {
-                    getGitBranch: () => null, getExtensionStatuses: () => new Map(),
+                    getGitBranch: () => null, getExtensionStatuses: () => nativeStatuses.get(session)!,
                     getAvailableProviderCount: () => 1, onBranchChange: () => () => {},
                 });
                 expect(component.render(width).every((line) => visibleWidth(line) <= width)).toBe(true);
             }
+            await session.setModel(createModel({ id: "unsupported", provider: "checkpoint-test", api: "anthropic-messages" }));
+            expect(nativeStatuses.get(session)?.has("verbosity")).toBe(false);
+            expect(await activeVerbosity(session)).toBeUndefined();
+            await session.setModel(createModel({ provider: "checkpoint-test", api: "openai-responses" }));
+            expect(nativeStatuses.get(session)?.get("verbosity")).toBe("🗣  low");
             await saveConfig({ showIndicator: false, models: { "gpt-5.4": "high" } });
             await session.reload();
             expect(await activeVerbosity(session)).toBe("high");
@@ -384,52 +396,68 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
             await shortcut(session);
             await shortcut(session, true);
             expect(await activeVerbosity(session)).toBe("medium");
-            expect(footer(session)).toContain("🗣  medium");
-            const before = await readFile(path.join(testHome, ".pi/agent/verbosity.json"), "utf8");
+            expect(footer(session)).toContain("🗣 medium");
+            const before = await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8");
             const result = await receipt(session);
             expect(result.blockers).toEqual([]);
             expect(result.sleepReady).toBe(true);
-            expect(await readFile(path.join(testHome, ".pi/agent/verbosity.json"), "utf8")).toBe(before);
+            expect(await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8")).toBe(before);
             checkpoint = result.checkpoint;
         } finally { await close(session); }
         expect(FooterComponent.prototype.render).toBe(originalRender);
         const restored = await start(checkpoint!);
         try {
             expect(await activeVerbosity(restored)).toBe("medium");
-            expect(footer(restored)).toContain("🗣  medium");
+            expect(footer(restored)).toContain("🗣 medium");
             expect((await receipt(restored)).sleepReady).toBe(true);
         } finally { await close(restored); }
         expect(FooterComponent.prototype.render).toBe(originalRender);
     });
 
-    it("does not certify divergent, truncated, missing, or unreadable nondefault config", async () => {
+    it("keeps malformed or unreadable config out of active state and blocks sleep", async () => {
         const config = { showIndicator: true, models: { "gpt-5.4": "high" as const } };
         await saveConfig(config);
         const session = await start();
-        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
         try {
-            for (const changed of [JSON.stringify({ ...config, showIndicator: false }),
-                JSON.stringify({ ...config, models: { "gpt-5.4": "low" } }), '{"models":']) {
-                await writeFile(file, changed);
-                const result = await receipt(session);
-                expect(result.sleepReady).toBe(false);
-                expect(result.blockers.join()).toContain("Verbosity config");
-                expect(await readFile(file, "utf8")).toBe(changed);
-                expect(await activeVerbosity(session)).toBe("high");
-            }
-            await rm(file);
+            await writeFile(file, '{"models":');
+            expect(await activeVerbosity(session)).toBe("high");
+            expect(nativeStatuses.get(session)?.get("verbosity")).toBe("🗣  high");
             expect((await receipt(session)).sleepReady).toBe(false);
+            expect(await readFile(file, "utf8")).toBe('{"models":');
+            await rm(file);
             await mkdir(file);
             expect((await receipt(session)).sleepReady).toBe(false);
             await rm(file, { recursive: true });
             await saveConfig(config);
+            expect(await activeVerbosity(session)).toBe("high");
             expect((await receipt(session)).sleepReady).toBe(true);
         } finally { await close(session); }
     });
 
+    it("invalidates a held receipt before applying a changed file snapshot", async () => {
+        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high" } });
+        const session = await start();
+        const hold = await session.acquireCheckpoint({ quiesce: () => () => {} });
+        try {
+            expect(hold.sleepReady).toBe(true);
+            // Semantically identical writes must not invalidate a reconstructible receipt.
+            const replacement = path.join(sdk.getAgentDir(), "replacement.json");
+            await writeFile(replacement, '{"models":{"gpt-5.4":"HIGH"},"showIndicator":true}');
+            await rename(replacement, path.join(sdk.getAgentDir(), "verbosity.json"));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(hold.signal.aborted).toBe(false);
+            await saveConfig({ showIndicator: true, models: { "gpt-5.4": "low" } });
+            await vi.waitFor(() => expect(hold.signal.aborted).toBe(true));
+            expect(nativeStatuses.get(session)?.get("verbosity")).toBe("🗣  low");
+            expect(await activeVerbosity(session)).toBe("low");
+            expect((await receipt(session)).sleepReady).toBe(true);
+        } finally { hold.release(); await close(session); }
+    });
+
     it("accepts missing defaults and semantic equality but not malformed fallback defaults", async () => {
         const session = await start();
-        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
         try {
             expect((await receipt(session)).sleepReady).toBe(true);
             await mkdir(path.dirname(file), { recursive: true });
@@ -440,18 +468,19 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
         } finally { await close(session); }
     });
 
-    it("reload reconciles an external edit and retains footer teardown", async () => {
+    it("reconciles external edits before sleep and recreates status ownership on reload", async () => {
         await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high", "another-model": "low" } });
         const originalRender = FooterComponent.prototype.render;
         const session = await start();
-        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
         try {
             await writeFile(file, '{"models":{"another-model":"LOW","gpt-5.4":"HIGH"},"showIndicator":true}');
             expect((await receipt(session)).sleepReady).toBe(true);
             const changed = '{"showIndicator":false,"models":{"gpt-5.4":"low"}}';
             await writeFile(file, changed);
-            expect((await receipt(session)).sleepReady).toBe(false);
-            expect(footer(session)).toContain("🗣  high");
+            await vi.waitFor(() => expect(nativeStatuses.get(session)?.has("verbosity")).toBe(false));
+            expect(await activeVerbosity(session)).toBe("low");
+            expect((await receipt(session)).sleepReady).toBe(true);
             await session.reload();
             expect(await activeVerbosity(session)).toBe("low");
             expect(FooterComponent.prototype.render).toBe(originalRender);
@@ -464,14 +493,15 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
     it("keeps failed shortcut writes out of active state and blocks unrecoverable file state", async () => {
         await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high" } });
         const session = await start();
-        const file = path.join(testHome, ".pi/agent/verbosity.json");
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
         try {
-            await rm(file);
-            await mkdir(file); // Real EISDIR failure, not mocked saveConfig.
+            // Keep the fixture transition in one turn: a real deletion would reset settings before EISDIR.
+            rmSync(file);
+            mkdirSync(file); // Real EISDIR failure, not mocked saveConfig.
             await shortcut(session);
             await shortcut(session, true);
             expect(await activeVerbosity(session)).toBe("high");
-            expect(footer(session)).toContain("🗣  high");
+            expect(footer(session)).toContain("🗣 high");
             expect((await receipt(session)).sleepReady).toBe(false);
         } finally { await close(session); }
     });
@@ -502,6 +532,70 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
 });
 
 describe("pi-verbosity-control runtime", () => {
+    it("keeps status and requests in sync across external edits, shortcuts, model changes and shutdown", async () => {
+        const runtime = await createRuntime({
+            showIndicator: true,
+            models: { "gpt-5.4": "low", "openai-codex/gpt-5.4": "high" },
+        });
+        const { ctx } = createContext(createModel());
+        const payload = { stream: true, text: { format: "plain" } };
+        const request = () => runtime.beforeProviderRequestHandler({ payload }, ctx);
+        await runtime.sessionStartHandler({}, ctx);
+        try {
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  high");
+            expect(request()).toEqual({ ...payload, text: { format: "plain", verbosity: "high" } });
+
+            await runtime.cycleShortcutHandler(ctx);
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  low");
+            expect(request()).toMatchObject({ text: { verbosity: "low" } });
+            await runtime.toggleIndicatorShortcutHandler(ctx);
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", undefined);
+            expect(request()).toMatchObject({ text: { verbosity: "low" } });
+
+            const replacement = path.join(sdk.getAgentDir(), "replacement.json");
+            await writeFile(replacement, JSON.stringify({ showIndicator: true, models: { "gpt-5.4": "medium" } }));
+            await rename(replacement, path.join(sdk.getAgentDir(), "verbosity.json"));
+            await vi.waitFor(() => expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  medium"));
+            expect(request()).toMatchObject({ text: { verbosity: "medium" } });
+
+            // A native request boundary must refresh even before fs.watch is delivered.
+            writeFileSync(path.join(sdk.getAgentDir(), "verbosity.json"), '{"showIndicator":true,"models":{"gpt-5.4":"high"}}');
+            expect(request()).toMatchObject({ text: { verbosity: "high" } });
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  high");
+            await runtime.cycleShortcutHandler(ctx);
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  low");
+
+            for (const model of [createModel({ api: "anthropic-messages" }), createModel({ id: "unconfigured" }), undefined]) {
+                ctx.model = model;
+                await runtime.modelSelectHandler({}, ctx);
+                expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", undefined);
+                expect(request()).toBeUndefined();
+            }
+            ctx.model = createModel({ provider: "another-provider", api: "azure-openai-responses" });
+            await runtime.modelSelectHandler({}, ctx);
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  low");
+            expect(request()).toMatchObject({ text: { verbosity: "low" } });
+        } finally {
+            await runtime.sessionShutdownHandler({}, ctx);
+        }
+        expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", undefined);
+        const calls = vi.mocked(ctx.ui.setStatus).mock.calls.length;
+        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high" } });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(ctx.ui.setStatus).toHaveBeenCalledTimes(calls);
+    });
+    it.each(["cycleShortcutHandler", "toggleIndicatorShortcutHandler"] as const)("does not republish status when %s finishes after shutdown", async (handler) => {
+        const runtime = await createRuntime({ showIndicator: true, models: { "gpt-5.4": "low" } });
+        const { ctx } = createContext(createModel());
+        await runtime.sessionStartHandler({}, ctx);
+        const saving = runtime[handler](ctx);
+        await runtime.sessionShutdownHandler({}, ctx);
+        const calls = vi.mocked(ctx.ui.setStatus).mock.calls.length;
+        await saving;
+        expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", undefined);
+        expect(ctx.ui.setStatus).toHaveBeenCalledTimes(calls);
+    });
+
     it("patches requests for configured models after session start", async () => {
         const runtime = await createRuntime({
             showIndicator: false,
@@ -546,7 +640,7 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionStartHandler({}, ctx);
         await runtime.cycleShortcutHandler(ctx);
 
-        const saved = JSON.parse(await readFile(path.join(testHome, ".pi", "agent", "verbosity.json"), "utf8")) as {
+        const saved = JSON.parse(await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8")) as {
             showIndicator: boolean;
             models: Record<string, string>;
         };
@@ -570,7 +664,7 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionStartHandler({}, ctx);
         await runtime.toggleIndicatorShortcutHandler(ctx);
 
-        const saved = JSON.parse(await readFile(path.join(testHome, ".pi", "agent", "verbosity.json"), "utf8")) as {
+        const saved = JSON.parse(await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8")) as {
             showIndicator: boolean;
             models: Record<string, string>;
         };
@@ -582,7 +676,7 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionShutdownHandler({}, ctx);
     });
 
-    it("patches only while the indicator is enabled and cleans up on session shutdown", async () => {
+    it("publishes native status without patching the footer and clears it on shutdown", async () => {
         const runtime = await createRuntime({
             showIndicator: true,
             models: {
@@ -593,9 +687,11 @@ describe("pi-verbosity-control runtime", () => {
         const originalRender = FooterComponent.prototype.render;
 
         await runtime.sessionStartHandler({}, ctx);
-        expect(FooterComponent.prototype.render).not.toBe(originalRender);
+        expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", "🗣  low");
+        expect(FooterComponent.prototype.render).toBe(originalRender);
 
         await runtime.sessionShutdownHandler({}, ctx);
+        expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", undefined);
         expect(FooterComponent.prototype.render).toBe(originalRender);
     });
 });

@@ -1,0 +1,9 @@
+# Changelog
+
+## 0.4.0 — 22 September 2026
+
+- Publish verbosity through Pi's native extension status, shared by stock and custom footers, instead of patching footer internals.
+- Use the active Pi agent directory and one configuration snapshot for request overrides and the indicator. Follow file edits, model changes, and existing shortcuts; release the watcher and status on shutdown.
+- Preserve native checkpoint behavior and invalidate held receipts before accepting changed settings.
+
+This maintained fork is distributed through Git. It does not publish the upstream npm package.
