@@ -10,9 +10,9 @@ Install this maintained fork from Git:
 pi install git:github.com/fitchmultz/pi-verbosity-control
 ```
 
-The original [ferologics package](https://github.com/ferologics/pi-verbosity-control) remains available as `npm:pi-verbosity-control`. The Git fork retains its attribution and package version; use the Git commit to identify this fork's code. This repository does not publish the upstream npm package.
+The original [ferologics package](https://github.com/ferologics/pi-verbosity-control) remains available as `npm:pi-verbosity-control`. The Git fork retains its attribution and has its own version history. This repository does not publish the upstream npm package.
 
-Restart Pi after changing extension code or dependencies. Official Pi supports code reload, but the maintained host fork requires a fresh process; `/reload` there refreshes resources and reinitializes cached extension code.
+Restart Pi after changing extension code or dependencies. On the qualified official and fork 0.87 hosts, `/reload` refreshes settings and non-code resources but does not activate updated extension code.
 
 ## What it does
 
@@ -49,7 +49,7 @@ Example `verbosity.json`:
 
 `showIndicator` defaults to `false`. Hiding the indicator does not disable request overrides. The indicator is absent when the selected model is unsupported or has no configured override.
 
-The controller owns both the request setting and its displayed status. It watches the agent directory for edits and atomic file replacements, and refreshes at startup, model changes, requests, and shortcuts. Invalid or unreadable edits retain the last good settings until corrected; a missing file restores defaults. If directory watching is unavailable, native event boundaries still refresh the configuration; `/reload` also retries the watcher.
+The controller owns both the request setting and its displayed status. It watches the agent directory for edits and atomic file replacements, and refreshes at startup, model changes, requests, and shortcuts. Unreadable files or syntactically invalid JSON retain the last good settings until corrected; a missing file restores defaults. If directory watching is unavailable, native event boundaries still refresh the configuration; `/reload` also retries the watcher.
 
 The stock footer displays the native status in its extension-status row. Custom footers can read `footerData.getExtensionStatuses().get("verbosity")`; they should not read the config themselves. The extension does not replace or patch any footer. Shutdown and reload clear its status and close its watcher.
 
