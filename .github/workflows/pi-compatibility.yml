@@ -78,8 +78,6 @@ jobs:
           node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$FORK_REF"
           git diff --exit-code
       - name: Official Pi / Node 24
-        env:
-          PI_COMPAT_LANE_LABEL: official
         run: |
           version=$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')
           env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
@@ -87,7 +85,6 @@ jobs:
             --host official --target "$version" --output "$RUNNER_TEMP/qualification-official-node24"
       - name: Fork Pi / Node 24
         env:
-          PI_COMPAT_LANE_LABEL: fork
           PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.ref }}
         run: |
           env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
@@ -102,7 +99,6 @@ jobs:
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
       - name: Fork Pi / Node 22.19
         env:
-          PI_COMPAT_LANE_LABEL: fork
           PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.ref }}
         run: |
           env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
