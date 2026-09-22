@@ -1,11 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readFileSync, watch, type FSWatcher } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, FooterComponent } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export type Verbosity = "low" | "medium" | "high";
 
@@ -33,9 +32,6 @@ const SUPPORTED_APIS = new Set<SupportedVerbosityApi>([
     "azure-openai-responses",
 ]);
 
-let originalFooterRender: ((this: FooterComponent, width: number) => string[]) | undefined;
-let footerPatched = false;
-
 function createDefaultConfig(): VerbosityConfig {
     return {
         showIndicator: DEFAULT_CONFIG.showIndicator,
@@ -44,7 +40,7 @@ function createDefaultConfig(): VerbosityConfig {
 }
 
 export function getGlobalConfigPath(): string {
-    return path.join(os.homedir(), ".pi", "agent", "verbosity.json");
+    return path.join(getAgentDir(), "verbosity.json");
 }
 
 export function isObject(value: unknown): value is JsonObject {
@@ -88,16 +84,21 @@ export function parseConfig(value: unknown): VerbosityConfig {
     };
 }
 
-export async function loadConfig(configPath = getGlobalConfigPath()): Promise<VerbosityConfig> {
+function readConfig(configPath: string): VerbosityConfig {
     try {
-        const raw = await readFile(configPath, "utf8");
-        return parseConfig(JSON.parse(raw) as unknown);
+        return parseConfig(JSON.parse(readFileSync(configPath, "utf8")) as unknown);
     } catch (error) {
-        const code = (error as { code?: string }).code;
-        if (code === "ENOENT") {
+        if ((error as { code?: string }).code === "ENOENT") {
             return createDefaultConfig();
         }
+        throw error;
+    }
+}
 
+export async function loadConfig(configPath = getGlobalConfigPath()): Promise<VerbosityConfig> {
+    try {
+        return readConfig(configPath);
+    } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[pi-verbosity-control] Failed to read ${configPath}: ${message}`);
         return createDefaultConfig();
@@ -185,96 +186,6 @@ export function patchPayloadVerbosity(payload: unknown, verbosity: Verbosity): u
     };
 }
 
-export function buildFooterRightSideCandidates(
-    model: Pick<Model<Api>, "provider" | "id" | "reasoning">,
-    thinkingLevel: string | undefined,
-): string[] {
-    const modelName = model.id;
-    let rightSideWithoutProvider = modelName;
-
-    if (model.reasoning) {
-        const level = thinkingLevel || "off";
-        rightSideWithoutProvider = level === "off" ? `${modelName} • thinking off` : `${modelName} • ${level}`;
-    }
-
-    return [`(${model.provider}) ${rightSideWithoutProvider}`, rightSideWithoutProvider];
-}
-
-export function injectVerbosityIntoFooterLine(
-    line: string,
-    model: Pick<Model<Api>, "provider" | "id" | "reasoning">,
-    thinkingLevel: string | undefined,
-    verbosity: Verbosity,
-): string {
-    const candidates = buildFooterRightSideCandidates(model, thinkingLevel);
-    const suffix = ` • 🗣  ${verbosity}`;
-
-    for (const candidate of candidates) {
-        const candidateStart = line.lastIndexOf(candidate);
-        if (candidateStart === -1) {
-            continue;
-        }
-
-        let paddingStart = candidateStart;
-        while (paddingStart > 0 && line[paddingStart - 1] === " ") {
-            paddingStart--;
-        }
-
-        const prefix = line.slice(0, paddingStart);
-        const suffixAnsi = line.slice(candidateStart + candidate.length);
-        const availableWidth = candidateStart - paddingStart + visibleWidth(candidate);
-        const desiredRightSide = `${candidate}${suffix}`;
-        const fittedRightSide = truncateToWidth(desiredRightSide, availableWidth, "");
-        const fittedWidth = visibleWidth(fittedRightSide);
-        const nextPadding = " ".repeat(Math.max(0, availableWidth - fittedWidth));
-
-        return `${prefix}${nextPadding}${fittedRightSide}${suffixAnsi}`;
-    }
-
-    return line;
-}
-
-function patchFooterRender(getConfig: () => VerbosityConfig): void {
-    if (footerPatched) {
-        return;
-    }
-
-    originalFooterRender = FooterComponent.prototype.render;
-    FooterComponent.prototype.render = function renderWithVerbosity(width: number): string[] {
-        const lines = originalFooterRender?.call(this, width) ?? [];
-        if (lines.length < 2) {
-            return lines;
-        }
-
-        const session = (this as unknown as { session?: { state?: { model?: Model<Api>; thinkingLevel?: string } } })
-            .session;
-        const model = session?.state?.model;
-        if (!model || !supportsVerbosityControl(model)) {
-            return lines;
-        }
-
-        const { verbosity } = resolveConfiguredVerbosity(getConfig(), model);
-        if (!verbosity) {
-            return lines;
-        }
-
-        const nextLines = [...lines];
-        nextLines[1] = injectVerbosityIntoFooterLine(lines[1] ?? "", model, session?.state?.thinkingLevel, verbosity);
-        return nextLines;
-    };
-    footerPatched = true;
-}
-
-function unpatchFooterRender(): void {
-    if (!footerPatched || !originalFooterRender) {
-        return;
-    }
-
-    FooterComponent.prototype.render = originalFooterRender;
-    footerPatched = false;
-    originalFooterRender = undefined;
-}
-
 function getCycleShortcut(): KeyId {
     return process.platform === "darwin" ? (MACOS_CYCLE_SHORTCUT as KeyId) : (OTHER_CYCLE_SHORTCUT as KeyId);
 }
@@ -288,18 +199,39 @@ function getToggleIndicatorShortcut(): KeyId {
 export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
     let activeConfig = createDefaultConfig();
 
-    const syncFooterIndicator = () => {
-        if (activeConfig.showIndicator) {
-            patchFooterRender(() => activeConfig);
-            return;
-        }
+    const configPath = getGlobalConfigPath();
+    let activeContext: ExtensionContext | undefined;
+    let watcher: FSWatcher | undefined;
+    let checkpoint: { signal: AbortSignal; invalidate(): void } | undefined;
 
-        unpatchFooterRender();
+    const publishStatus = (ctx: ExtensionContext) => {
+        const model = ctx.model;
+        const verbosity = model && supportsVerbosityControl(model)
+            ? resolveConfiguredVerbosity(activeConfig, model).verbosity
+            : undefined;
+        ctx.ui.setStatus("verbosity", activeConfig.showIndicator && verbosity ? `🗣  ${verbosity}` : undefined);
+        return verbosity;
+    };
+
+    const refresh = (ctx: ExtensionContext, fromWatcher = false) => {
+        activeContext = ctx;
+        let nextConfig = activeConfig;
+        try {
+            // One synchronous snapshot for the request policy and its native status.
+            nextConfig = readConfig(configPath);
+            if (fromWatcher && isDeepStrictEqual(nextConfig, activeConfig)) return;
+        } catch {
+            // Keep the last good settings while an editor is writing incomplete JSON.
+        }
+        if (checkpoint && !checkpoint.signal.aborted) checkpoint.invalidate();
+        activeConfig = nextConfig;
+        return publishStatus(ctx);
     };
 
     pi.registerShortcut(getCycleShortcut(), {
         description: "Cycle response verbosity for the current model",
         handler: async (ctx) => {
+            refresh(ctx);
             const model = ctx.model;
             if (!model) {
                 if (ctx.hasUI) {
@@ -321,8 +253,9 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
             const nextConfig = setModelVerbosity(activeConfig, configKey, nextVerbosity);
 
             try {
-                await saveConfig(nextConfig);
+                await saveConfig(nextConfig, configPath);
             } catch (error) {
+                if (!activeContext) return;
                 const message = error instanceof Error ? error.message : String(error);
                 if (ctx.hasUI) {
                     ctx.ui.notify(`Failed to save verbosity config: ${message}`, "error");
@@ -330,7 +263,9 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
                 return;
             }
 
+            if (!activeContext) return;
             activeConfig = nextConfig;
+            publishStatus(activeContext);
 
             if (ctx.hasUI) {
                 ctx.ui.notify(`Verbosity for ${configKey} → ${nextVerbosity}`, "info");
@@ -341,11 +276,13 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
     pi.registerShortcut(getToggleIndicatorShortcut(), {
         description: "Toggle verbosity indicator visibility",
         handler: async (ctx) => {
+            refresh(ctx);
             const nextConfig = setIndicatorVisibility(activeConfig, !activeConfig.showIndicator);
 
             try {
-                await saveConfig(nextConfig);
+                await saveConfig(nextConfig, configPath);
             } catch (error) {
+                if (!activeContext) return;
                 const message = error instanceof Error ? error.message : String(error);
                 if (ctx.hasUI) {
                     ctx.ui.notify(`Failed to save verbosity config: ${message}`, "error");
@@ -353,8 +290,9 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
                 return;
             }
 
+            if (!activeContext) return;
             activeConfig = nextConfig;
-            syncFooterIndicator();
+            publishStatus(activeContext);
 
             if (ctx.hasUI) {
                 ctx.ui.notify(`Verbosity indicator ${activeConfig.showIndicator ? "shown" : "hidden"}.`, "info");
@@ -362,46 +300,57 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
         },
     });
 
-    pi.on("session_start", async () => {
-        activeConfig = await loadConfig();
-        syncFooterIndicator();
+    pi.on("session_start", (_event, ctx) => {
+        watcher?.close();
+        refresh(ctx);
+        try {
+            // Watch the directory so atomic file replacements keep working.
+            watcher = watch(path.dirname(configPath), { persistent: false }, (_event, filename) => {
+                if (!activeContext || (filename && filename !== path.basename(configPath))) return;
+                refresh(activeContext, true);
+            });
+            watcher.on("error", () => watcher?.close());
+        } catch {
+            // Native request/model/shortcut boundaries still refresh without a watcher.
+        }
     });
 
-    pi.on("session_shutdown", async () => {
-        unpatchFooterRender();
+    pi.on("model_select", (_event, ctx) => { refresh(ctx); });
+
+    pi.on("session_shutdown", (_event, ctx) => {
+        watcher?.close();
+        watcher = undefined;
+        activeContext = undefined;
+        checkpoint = undefined;
+        ctx.ui.setStatus("verbosity", undefined);
     });
 
     // Additive native event: older upstream hosts accept the registration but
     // never emit it. Keep the local signature compatible with their API types.
-    const onCheckpoint = pi.on as unknown as (event: "session_checkpoint", handler: () => Promise<{
+    const onCheckpoint = pi.on as unknown as (event: "session_checkpoint", handler: (event: {
+        signal: AbortSignal;
+        invalidate(): void;
+    }) => Promise<{
         sleepReady: boolean;
         reason?: string;
     }>) => unknown;
-    onCheckpoint("session_checkpoint", async () => {
-        // Native ownership already joins startup/shortcut callbacks and holds
-        // ingress. No detached writers live here; verify the existing file, not
-        // loadConfig's error fallback, and never overwrite an external edit.
+    onCheckpoint("session_checkpoint", async (event) => {
+        checkpoint = event;
+        // Native ownership joins shortcuts; the watcher invalidates a held receipt
+        // before accepting a new file snapshot. Never rewrite external edits here.
         let persisted: VerbosityConfig;
         try {
-            persisted = parseConfig(JSON.parse(await readFile(getGlobalConfigPath(), "utf8")));
-        } catch (error) {
-            if ((error as { code?: string }).code !== "ENOENT") {
-                return { sleepReady: false, reason: "Verbosity config could not be read or parsed" };
-            }
-            persisted = createDefaultConfig();
+            persisted = readConfig(configPath);
+        } catch {
+            return { sleepReady: false, reason: "Verbosity config could not be read or parsed" };
         }
         return isDeepStrictEqual(persisted, activeConfig)
             ? { sleepReady: true }
-            : { sleepReady: false, reason: "Verbosity config differs from active settings; reload to reconcile" };
+            : { sleepReady: false, reason: "Verbosity config differs from active settings" };
     });
 
     pi.on("before_provider_request", (event, ctx) => {
-        const model = ctx.model;
-        if (!model || !supportsVerbosityControl(model)) {
-            return undefined;
-        }
-
-        const { verbosity } = resolveConfiguredVerbosity(activeConfig, model);
+        const verbosity = refresh(ctx);
         if (!verbosity) {
             return undefined;
         }

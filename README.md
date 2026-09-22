@@ -4,68 +4,38 @@ Apply per-model OpenAI `text.verbosity` overrides and cycle the current model's 
 
 ## Install
 
-This maintained fork is installed from Git:
+Install this maintained fork from Git:
 
 ```bash
 pi install git:github.com/fitchmultz/pi-verbosity-control
 ```
 
-The upstream ferologics package remains available as `npm:pi-verbosity-control` and
-`git:github.com/ferologics/pi-verbosity-control`. Both sources currently use version
-`0.3.0`, but that does **not** identify the same source revision. Qualification of
-this Git fork is not qualification of the upstream npm artifact, nor a claim of
-npm publishing rights. Upstream attribution and package metadata are retained.
+The original [ferologics package](https://github.com/ferologics/pi-verbosity-control) remains available as `npm:pi-verbosity-control`. The Git fork retains its attribution and package version; use the Git commit to identify this fork's code. This repository does not publish the upstream npm package.
 
-Restart Pi after changing extension code or dependencies. Official Pi supports
-code reload, but the maintained host fork deliberately requires a fresh process;
-`/reload` there refreshes config/resources and reinitializes cached extension code.
+Restart Pi after changing extension code or dependencies. Official Pi supports code reload, but the maintained host fork requires a fresh process; `/reload` there refreshes resources and reinitializes cached extension code.
 
 ## What it does
 
-- Reads global config from `~/.pi/agent/verbosity.json`
-- Supports model-specific overrides by bare model id (`gpt-5.4`) or exact provider/model (`openai-codex/gpt-5.4`)
-- Applies `text.verbosity` to supported OpenAI Responses-family requests right before they are sent
-- Cycles the current model's verbosity with a shortcut and saves it back to the config file
-- Optionally shows the active verbosity inline in Pi's footer
+- Reads `verbosity.json` from Pi's active agent directory: `~/.pi/agent` by default, or `PI_CODING_AGENT_DIR` when set.
+- Supports overrides by bare model id (`gpt-5.4`) or exact provider/model (`openai-codex/gpt-5.4`). Exact entries win.
+- Applies `text.verbosity` immediately before supported requests are sent, preserving other payload and `text` fields.
+- Cycles the current model's verbosity and saves it back to the same file.
+- Optionally publishes `🗣  <level>` through Pi's native `verbosity` status key.
 
-Exact `provider/model` entries win over bare model ids.
-
-## Supported APIs
-
-- `openai-responses`
-- `openai-codex-responses`
-- `azure-openai-responses`
-
-## Anthropic / Claude
-
-This extension is intentionally OpenAI-only.
-
-Anthropic does not currently expose a direct equivalent to OpenAI `text.verbosity`. Claude's `output_config.effort` is a separate effort/thoroughness control, not a drop-in verbosity setting, so this extension does not map verbosity onto Anthropic models.
+Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-responses`. Other APIs, including Anthropic, are left unchanged. Effort/thinking controls are separate from verbosity.
 
 ## Shortcuts
 
-- Cycle verbosity
-  - macOS: `Alt+V`
-  - Other platforms: `Ctrl+Alt+V`
-- Toggle footer indicator
-  - macOS: `Alt+Shift+V`
-  - Other platforms: `Ctrl+Alt+Shift+V`
+| Action | macOS | Other platforms |
+| --- | --- | --- |
+| Cycle verbosity | `Alt+V` | `Ctrl+Alt+V` |
+| Toggle indicator | `Alt+Shift+V` | `Ctrl+Alt+Shift+V` |
 
-The verbosity cycle is:
-
-```text
-low -> medium -> high -> low
-```
+The cycle is `low → medium → high → low`. An unconfigured supported model starts at `low`.
 
 ## Config
 
-Path:
-
-```text
-~/.pi/agent/verbosity.json
-```
-
-Example:
+Example `verbosity.json`:
 
 ```json
 {
@@ -77,55 +47,37 @@ Example:
 }
 ```
 
-- `showIndicator` defaults to `false`
-- When `showIndicator` is `false`, the extension does not patch Pi's footer at all
+`showIndicator` defaults to `false`. Hiding the indicator does not disable request overrides. The indicator is absent when the selected model is unsupported or has no configured override.
 
-If you edit the file manually while Pi is already running, use `/reload`.
+The controller owns both the request setting and its displayed status. It watches the agent directory for edits and atomic file replacements, and refreshes at startup, model changes, requests, and shortcuts. Invalid or unreadable edits retain the last good settings until corrected; a missing file restores defaults. If directory watching is unavailable, native event boundaries still refresh the configuration; `/reload` also retries the watcher.
+
+The stock footer displays the native status in its extension-status row. Custom footers can read `footerData.getExtensionStatuses().get("verbosity")`; they should not read the config themselves. The extension does not replace or patch any footer. Shutdown and reload clear its status and close its watcher.
 
 ## Working-session checkpoints
 
-On Pi hosts supporting the optional native `session_checkpoint` event, the extension verifies that the existing config file reconstructs its active settings before allowing sleep. Native dispatch already waits for startup and shortcut callbacks; checkpointing does not run shutdown or rewrite the file.
+On hosts supporting the optional native `session_checkpoint` event, the extension verifies that the existing file reconstructs its active settings before allowing sleep. Checkpointing neither runs shutdown nor rewrites the file. Unreconciled edits, malformed JSON, and read errors prevent sleep readiness. A missing file qualifies only when the active settings are defaults.
 
-External edits that differ from active settings, malformed JSON, and read errors keep sleep readiness false. Use `/reload` after reconciling the file. A missing file qualifies only when the active settings are the defaults. The archive owner must still preserve `~/.pi/agent/verbosity.json` and freeze external filesystem writers during capture.
-
-Hosts without this event retain normal behavior. Footer cleanup still runs on shutdown/reload.
+A watcher change invalidates a held receipt before updating active settings. The archive owner must still preserve the active agent directory's `verbosity.json` and freeze external filesystem writers during capture. Hosts without checkpoint support retain normal behavior.
 
 ## Tests
 
-`npm run check:compat` typechecks production source and runs the existing Vitest
-suite against this checkout's installed dependency graph. Development Pi packages
-are pinned to the official **0.87.0** cohort; Vitest remains **4.1.9**. No source-host
-aliases or Pi installation from PATH are used. A compatibility runner can replace
-the local Pi cohort with maintained-fork artifacts before invoking the same check.
+Use Node 24 and the repository's pinned official Pi **0.87.0** dependencies:
 
-The suite includes **14 existing helper/runtime cases, one native baseline case,
-and six optional native checkpoint cases**. The baseline verifies native request-hook
-dispatch, actual stock-footer rendering/width, config reload, and prototype teardown
-on both hosts. Requests are synthetic; it does not contact OpenAI or dispatch terminal
-keystrokes. The checkpoint cases are mandatory when `PI_COMPAT_HOST=fork` (or the
-legacy `PI_REQUIRE_CHECKPOINT=1`); missing native capability fails instead of skipping.
-They intentionally skip on official Pi without checkpoint support.
+```bash
+npm ci --ignore-scripts
+npm run check:compat
+```
 
-To reproduce the official baseline after `npm ci --ignore-scripts`, run from this
-extension directory with Node 24 (Bash):
+The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. Native checkpoint cases run when the host supports them; `PI_COMPAT_HOST=fork` requires that capability rather than skipping it. A compatibility runner can install maintained-fork artifacts into this checkout before running the same command.
+
+Tests use temporary config directories and synthetic request payloads; they do not contact OpenAI or dispatch terminal keystrokes. To isolate the command environment as well (Bash):
 
 ```bash
 fixture=$(mktemp -d /tmp/verbosity-ci.XXXXXX)
 trap 'rm -rf "$fixture"' EXIT
-mkdir -p "$fixture/home" "$fixture/tmp"
-env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
-    PI_CODING_AGENT_DIR="$fixture/home/.pi/agent" \
+mkdir -p "$fixture/home" "$fixture/agent" "$fixture/tmp"
+env -i PATH="$PATH" HOME="$fixture/home" USERPROFILE="$fixture/home" \
+    TMPDIR="$fixture/tmp" PI_CODING_AGENT_DIR="$fixture/agent" \
     PI_OFFLINE=1 PI_TELEMETRY=0 PI_COMPAT_HOST=official \
     npm run check:compat
 ```
-
-Keep HOME, USERPROFILE (on Windows), the agent-directory override, and temporary
-files coherent and outside your real home. Tests manage their own nested HOME and
-agent-directory overrides. Official 0.87.0 was locally checked with Node 24: 15 cases
-passed and six checkpoint cases skipped. Fork identity must be recorded by commit
-or artifact, not just its package version. Platform/terminal behavior and upstream
-npm publication remain separate qualification boundaries.
-
-## Notes
-
-- The optional footer indicator uses a runtime monkeypatch of Pi's built-in `FooterComponent`, not a public footer-composition API.
