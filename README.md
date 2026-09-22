@@ -94,7 +94,7 @@ Hosts without this event retain normal behavior. Footer cleanup still runs on sh
 
 `npm run check:compat` typechecks production source and runs the existing Vitest
 suite against this checkout's installed dependency graph. Development Pi packages
-are pinned to the official **0.86.1** cohort; Vitest remains **4.1.9**. No source-host
+are pinned to the official **0.87.0** cohort; Vitest remains **4.1.9**. No source-host
 aliases or Pi installation from PATH are used. A compatibility runner can replace
 the local Pi cohort with maintained-fork artifacts before invoking the same check.
 
@@ -121,7 +121,7 @@ env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
 
 Keep HOME, USERPROFILE (on Windows), the agent-directory override, and temporary
 files coherent and outside your real home. Tests manage their own nested HOME and
-agent-directory overrides. Official 0.86.1 was locally checked with Node 24: 15 cases
+agent-directory overrides. Official 0.87.0 was locally checked with Node 24: 15 cases
 passed and six checkpoint cases skipped. Fork identity must be recorded by commit
 or artifact, not just its package version. Platform/terminal behavior and upstream
 npm publication remain separate qualification boundaries.
