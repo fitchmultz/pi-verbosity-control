@@ -237,12 +237,7 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
         });
         try {
             // Re-read under the cross-process lock so another session's changes survive.
-            let current = activeConfig;
-            try {
-                current = readConfig(configPath);
-            } catch {
-                // Preserve the same last-good fallback used by refresh.
-            }
+            const current = readConfig(configPath);
             const next = update(current);
             await saveConfig(next, configPath);
             return next;

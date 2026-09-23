@@ -536,6 +536,34 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
 });
 
 describe("pi-verbosity-control runtime", () => {
+    it.each(["cycleShortcutHandler", "toggleIndicatorShortcutHandler"] as const)(
+        "%s preserves malformed config and reports the save failure",
+        async (shortcut) => {
+            const config: VerbosityConfig = { showIndicator: false, models: { "gpt-5.4": "high" } };
+            const runtime = await createRuntime(config);
+            const { ctx, notifyMock } = createContext(createModel());
+            const file = path.join(sdk.getAgentDir(), "verbosity.json");
+            const malformed = '{"showIndicator":false,"models":{"gpt-5.4":"high",}}';
+            await writeFile(file, malformed);
+            await runtime.sessionStartHandler({}, ctx);
+            try {
+                await runtime[shortcut](ctx);
+                expect(await readFile(file, "utf8")).toBe(malformed);
+                expect(notifyMock).toHaveBeenLastCalledWith(
+                    expect.stringContaining("Failed to save verbosity config:"), "error",
+                );
+                await saveConfig(config);
+                await runtime[shortcut](ctx);
+                expect(notifyMock).toHaveBeenLastCalledWith(expect.any(String), "info");
+                expect(await loadConfig()).toEqual(shortcut === "cycleShortcutHandler"
+                    ? { ...config, models: { "gpt-5.4": "low" } }
+                    : { ...config, showIndicator: true });
+            } finally {
+                await runtime.sessionShutdownHandler({}, ctx);
+            }
+        },
+    );
+
     it("waits for another process's lock and reads its changes before saving", async () => {
         await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
         let release: (() => Promise<void>) | undefined = await lockfile.lock(
