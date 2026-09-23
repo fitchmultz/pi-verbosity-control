@@ -1,5 +1,5 @@
 import { readFileSync, watch, type FSWatcher } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
@@ -108,7 +108,23 @@ export async function loadConfig(configPath = getGlobalConfigPath()): Promise<Ve
 
 export async function saveConfig(config: VerbosityConfig, configPath = getGlobalConfigPath()): Promise<void> {
     await mkdir(path.dirname(configPath), { recursive: true });
-    await writeFile(configPath, `${JSON.stringify(config, null, 4)}\n`, "utf8");
+    const targetPath = await realpath(configPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+        return configPath;
+    });
+    const stagingDir = await mkdtemp(`${targetPath}.`);
+    const stagedPath = path.join(stagingDir, "config");
+    try {
+        try {
+            await copyFile(targetPath, stagedPath);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        await writeFile(stagedPath, `${JSON.stringify(config, null, 4)}\n`, "utf8");
+        await rename(stagedPath, targetPath);
+    } finally {
+        await rm(stagingDir, { recursive: true, force: true });
+    }
 }
 
 export function getExactModelKey(model: Pick<Model<Api>, "provider" | "id">): string {

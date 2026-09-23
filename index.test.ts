@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
@@ -139,6 +139,32 @@ describe("pi-verbosity-control config io", () => {
         "gpt-5.4": "low"
     }
 }\n`);
+    });
+
+    it.skipIf(process.platform === "win32")("preserves the existing config when a shortcut write fails", async () => {
+        const config: VerbosityConfig = { showIndicator: true, models: { "gpt-5.4": "low" } };
+        for (let i = 0; i < 100; i++) config.models[`model-${i}`] = "high";
+        await saveConfig(config);
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
+        const before = await readFile(file, "utf8");
+
+        const child = spawnSync("bash", [
+            "-c", 'ulimit -f 1; exec "$@"', "bash", process.execPath, "--input-type=module", "-e", `
+                process.on("SIGXFSZ", () => {});
+                const { default: extension } = await import(${JSON.stringify(pathToFileURL(path.resolve("index.ts")).href)});
+                const shortcuts = new Map();
+                extension({ on() {}, registerShortcut(key, { handler }) { shortcuts.set(key, handler); } });
+                const ctx = {
+                    model: { provider: "openai", id: "gpt-5.4", api: "openai-responses" },
+                    hasUI: true,
+                    ui: { setStatus() {}, notify(message) { console.log(message); } },
+                };
+                await shortcuts.get(${JSON.stringify(process.platform === "darwin" ? "alt+v" : "ctrl+alt+v")})(ctx);
+            `,
+        ], { encoding: "utf8", env: process.env });
+        expect(child.status).toBe(0);
+        expect(child.stdout).toContain("Failed to save verbosity config: EFBIG");
+        expect(await readFile(file, "utf8")).toBe(before);
     });
 
     it("ignores invalid config values and keeps valid ones", async () => {
