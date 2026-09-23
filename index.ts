@@ -32,6 +32,8 @@ const SUPPORTED_APIS = new Set<SupportedVerbosityApi>([
     "openai-codex-responses",
     "azure-openai-responses",
 ]);
+// These older OpenAI models accept only medium, so cycling to low/high rejects requests.
+const LEGACY_OPENAI_MODELS = /^(?:gpt-4|o[134](?:-|$))/;
 
 function createDefaultConfig(): VerbosityConfig {
     return {
@@ -151,12 +153,14 @@ export function getExactModelKey(model: Pick<Model<Api>, "provider" | "id">): st
     return `${model.provider}/${model.id}`;
 }
 
-export function supportsVerbosityControl(model: Pick<Model<Api>, "api"> | undefined): boolean {
+export function supportsVerbosityControl(model: Pick<Model<Api>, "api" | "provider" | "id"> | undefined): boolean {
     if (!model) {
         return false;
     }
 
-    return SUPPORTED_APIS.has(model.api as SupportedVerbosityApi);
+    const officialOpenAI = model.provider === "openai" || model.provider === "azure-openai-responses";
+    return SUPPORTED_APIS.has(model.api as SupportedVerbosityApi)
+        && !(officialOpenAI && LEGACY_OPENAI_MODELS.test(model.id));
 }
 
 export function resolveConfiguredVerbosity(

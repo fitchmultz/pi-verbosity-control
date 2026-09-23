@@ -826,6 +826,31 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionShutdownHandler({}, ctx);
     });
 
+    it.each([
+        { provider: "openai", api: "openai-responses", id: "gpt-4.1" },
+        { provider: "openai", api: "openai-responses", id: "gpt-4o-mini" },
+        { provider: "openai", api: "openai-responses", id: "o3" },
+        { provider: "azure-openai-responses", api: "azure-openai-responses", id: "gpt-4.1" },
+    ] as const)("leaves $provider/$id requests unchanged when verbosity is unsupported", async ({ provider, api, id }) => {
+        const config: VerbosityConfig = { showIndicator: true, models: {} };
+        const runtime = await createRuntime(config);
+        const { ctx, notifyMock } = createContext(createModel({ provider, api, id }));
+        await runtime.sessionStartHandler({}, ctx);
+        try {
+            await runtime.cycleShortcutHandler(ctx);
+            expect(notifyMock).toHaveBeenLastCalledWith(
+                `Verbosity control is not supported for ${provider}/${id}.`, "warning",
+            );
+            expect(await loadConfig()).toEqual(config);
+
+            await saveConfig({ showIndicator: true, models: { [id]: "low" } });
+            expect(runtime.beforeProviderRequestHandler({ payload: { model: id } }, ctx)).toBeUndefined();
+            expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("verbosity", undefined);
+        } finally {
+            await runtime.sessionShutdownHandler({}, ctx);
+        }
+    });
+
     it("cycles and persists the current model setting from the shortcut", async () => {
         const runtime = await createRuntime({
             showIndicator: false,
