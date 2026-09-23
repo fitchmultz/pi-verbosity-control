@@ -124,13 +124,13 @@ function runLimitedShortcut(modelId: string): string {
             const shortcuts = new Map();
             extension({ on() {}, registerShortcut(key, { handler }) { shortcuts.set(key, handler); } });
             const ctx = {
-                model: { provider: "openai", id: process.env.VERBOSITY_TEST_MODEL_ID, api: "openai-responses" },
+                model: { provider: "openai", id: ${JSON.stringify(modelId)}, api: "openai-responses" },
                 hasUI: true,
                 ui: { setStatus() {}, notify(message) { console.log(message); } },
             };
             await shortcuts.get(${JSON.stringify(process.platform === "darwin" ? "alt+v" : "ctrl+alt+v")})(ctx);
         `,
-    ], { encoding: "utf8", env: { ...process.env, VERBOSITY_TEST_MODEL_ID: modelId } });
+    ], { encoding: "utf8" });
     expect(child.status).toBe(0);
     return child.stdout;
 }
