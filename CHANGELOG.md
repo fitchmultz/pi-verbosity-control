@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Leave OpenAI and Azure GPT-4 and o1/o3/o4 requests unchanged instead of sending unsupported low/high verbosity.
 - Preserve concurrent verbosity and indicator changes across Pi sessions by locking the complete read-modify-write operation.
 - Keep the previous config intact when a shortcut save fails partway through writing.
 

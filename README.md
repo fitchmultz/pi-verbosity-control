@@ -22,7 +22,7 @@ Restart Pi after changing extension code or dependencies. On the qualified offic
 - Cycles the current model's verbosity and saves it back to the same file.
 - Optionally publishes `🗣  <level>` through Pi's native `verbosity` status key.
 
-Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-responses`. Other APIs, including Anthropic, are left unchanged. Effort/thinking controls are separate from verbosity.
+Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-responses`. OpenAI and Azure GPT-4 and o1/o3/o4 models accept only `medium`; the extension leaves them unchanged and warns when cycling. Other APIs, including Anthropic, are left unchanged. Effort/thinking controls are separate from verbosity.
 
 ## Shortcuts
 
