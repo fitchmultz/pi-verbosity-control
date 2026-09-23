@@ -33,7 +33,7 @@ Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-
 
 The cycle is `low → medium → high → low`. An unconfigured supported model starts at `low`.
 
-Shortcut saves use a cross-process file lock and re-read the configuration before changing it, preserving concurrent changes from other updated Pi sessions. If the file cannot be read or parsed, the shortcut reports an error and leaves it unchanged. Manual editors do not participate in this lock.
+Shortcut saves use a cross-process file lock and re-read the configuration before changing it, preserving concurrent changes from other updated Pi sessions. They replace the file only after a complete write, so failed writes leave the previous config intact. If the file cannot be read or parsed, the shortcut reports an error and leaves it unchanged. Manual editors do not participate in this lock.
 
 ## Config
 

@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
@@ -116,6 +116,25 @@ describe("pi-verbosity-control helpers", () => {
 
 });
 
+function runLimitedShortcut(modelId: string): string {
+    const child = spawnSync("bash", [
+        "-c", 'ulimit -f 1; exec "$@"', "bash", process.execPath, "--input-type=module", "-e", `
+            process.on("SIGXFSZ", () => {});
+            const { default: extension } = await import(${JSON.stringify(pathToFileURL(path.resolve("index.ts")).href)});
+            const shortcuts = new Map();
+            extension({ on() {}, registerShortcut(key, { handler }) { shortcuts.set(key, handler); } });
+            const ctx = {
+                model: { provider: "openai", id: ${JSON.stringify(modelId)}, api: "openai-responses" },
+                hasUI: true,
+                ui: { setStatus() {}, notify(message) { console.log(message); } },
+            };
+            await shortcuts.get(${JSON.stringify(process.platform === "darwin" ? "alt+v" : "ctrl+alt+v")})(ctx);
+        `,
+    ], { encoding: "utf8" });
+    expect(child.status).toBe(0);
+    return child.stdout;
+}
+
 describe("pi-verbosity-control config io", () => {
     it("loads missing config as empty with hidden indicator", async () => {
         await expect(loadConfig()).resolves.toEqual({ showIndicator: false, models: {} });
@@ -139,6 +158,42 @@ describe("pi-verbosity-control config io", () => {
         "gpt-5.4": "low"
     }
 }\n`);
+    });
+
+    it.skipIf(process.platform === "win32")("preserves the existing config when a shortcut write fails", async () => {
+        await saveConfig({ showIndicator: true, models: {} });
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
+        const before = await readFile(file, "utf8");
+
+        expect(runLimitedShortcut("x".repeat(2048))).toContain("Failed to save verbosity config: EFBIG");
+        expect(await readFile(file, "utf8")).toBe(before);
+    });
+
+    it.skipIf(process.platform === "win32")("saves a smaller config when the old file exceeds the file limit", async () => {
+        const file = path.join(sdk.getAgentDir(), "verbosity.json");
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, JSON.stringify({
+            showIndicator: false,
+            models: { "gpt-5.4": "low" },
+            ignored: "x".repeat(2048),
+        }));
+
+        expect(runLimitedShortcut("gpt-5.4")).toContain("Verbosity for gpt-5.4 → medium");
+        expect(await loadConfig()).toEqual({ showIndicator: false, models: { "gpt-5.4": "medium" } });
+    });
+
+    it.skipIf(process.platform === "win32")("saves through a symlink to a missing config file", async () => {
+        const agentDir = sdk.getAgentDir();
+        const file = path.join(agentDir, "verbosity.json");
+        const target = path.join(agentDir, "shared", "verbosity.json");
+        await mkdir(path.dirname(target), { recursive: true });
+        await symlink("shared/verbosity.json", file);
+        const config: VerbosityConfig = { showIndicator: true, models: { "gpt-5.4": "high" } };
+
+        await saveConfig(config);
+
+        expect(await readlink(file)).toBe("shared/verbosity.json");
+        expect(JSON.parse(await readFile(target, "utf8"))).toEqual(config);
     });
 
     it("ignores invalid config values and keeps valid ones", async () => {

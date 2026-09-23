@@ -1,5 +1,5 @@
-import { readFileSync, watch, type FSWatcher } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { constants, readFileSync, watch, type FSWatcher } from "node:fs";
+import { access, chmod, mkdir, mkdtemp, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
@@ -108,7 +108,39 @@ export async function loadConfig(configPath = getGlobalConfigPath()): Promise<Ve
 
 export async function saveConfig(config: VerbosityConfig, configPath = getGlobalConfigPath()): Promise<void> {
     await mkdir(path.dirname(configPath), { recursive: true });
-    await writeFile(configPath, `${JSON.stringify(config, null, 4)}\n`, "utf8");
+    let targetPath = configPath;
+    while (true) {
+        try {
+            targetPath = await realpath(targetPath);
+            break;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        try {
+            // A dangling symlink must still point to the new file after the save.
+            const link = await readlink(targetPath);
+            targetPath = path.isAbsolute(link) ? link : `${path.dirname(targetPath)}${path.sep}${link}`;
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT" && code !== "EINVAL") throw error;
+            break;
+        }
+    }
+    targetPath = path.join(await realpath(path.dirname(targetPath)), path.basename(targetPath));
+    const stagingDir = await mkdtemp(`${targetPath}.`);
+    const stagedPath = path.join(stagingDir, "config");
+    try {
+        const previous = await stat(targetPath).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== "ENOENT") throw error;
+            return undefined;
+        });
+        if (previous) await access(targetPath, constants.W_OK);
+        await writeFile(stagedPath, `${JSON.stringify(config, null, 4)}\n`, "utf8");
+        if (previous) await chmod(stagedPath, previous.mode & 0o7777);
+        await rename(stagedPath, targetPath);
+    } finally {
+        await rm(stagingDir, { recursive: true, force: true });
+    }
 }
 
 export function getExactModelKey(model: Pick<Model<Api>, "provider" | "id">): string {

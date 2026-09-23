@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Preserve concurrent verbosity and indicator changes across Pi sessions by locking the complete read-modify-write operation.
+- Keep the previous config intact when a shortcut save fails partway through writing.
 
 ## 0.4.0 — 22 September 2026
 
