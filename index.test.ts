@@ -1,7 +1,11 @@
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import lockfile from "proper-lockfile";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { FooterComponent } from "@earendil-works/pi-coding-agent";
 import * as sdk from "@earendil-works/pi-coding-agent";
@@ -532,6 +536,77 @@ describe.skipIf(!hasCheckpoint)("native checkpoints", () => {
 });
 
 describe("pi-verbosity-control runtime", () => {
+    it("waits for another process's lock and reads its changes before saving", async () => {
+        await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
+        let release: (() => Promise<void>) | undefined = await lockfile.lock(
+            path.join(sdk.getAgentDir(), "verbosity.json"), { realpath: false },
+        );
+        const child = spawn(process.execPath, ["--input-type=module", "-e", `
+            import extension from ${JSON.stringify(pathToFileURL(path.resolve("index.ts")).href)};
+            let cycle;
+            extension({
+                on() {},
+                registerShortcut(key, options) {
+                    if (key === ${JSON.stringify(process.platform === "darwin" ? "alt+v" : "ctrl+alt+v")}) cycle = options.handler;
+                },
+            });
+            const saving = cycle({
+                model: { id: "gpt-5.4", provider: "openai", api: "openai-responses" },
+                hasUI: false,
+                ui: { setStatus() {} },
+            });
+            process.send("started");
+            await saving;
+            process.disconnect();
+        `], { stdio: ["ignore", "ignore", "inherit", "ipc"], env: process.env });
+        const exited = once(child, "exit");
+        try {
+            expect(await once(child, "message")).toEqual(["started", undefined]);
+            await saveConfig({ showIndicator: true, models: { "gpt-5.4": "low", "other-model": "high" } });
+            await release();
+            release = undefined;
+            expect(await exited).toEqual([0, null]);
+            expect(await loadConfig()).toEqual({
+                showIndicator: true, models: { "gpt-5.4": "medium", "other-model": "high" },
+            });
+        } finally {
+            await release?.();
+            if (child.exitCode === null) {
+                child.kill();
+                await exited;
+            }
+        }
+    });
+
+    it.each([
+        { name: "different models", secondModel: "gpt-5.3-codex", toggle: false, models: { "gpt-5.4": "medium", "gpt-5.3-codex": "medium" }, showIndicator: false },
+        { name: "the same model", secondModel: "gpt-5.4", toggle: false, models: { "gpt-5.4": "high", "gpt-5.3-codex": "low" }, showIndicator: false },
+        { name: "a model and the indicator", secondModel: "gpt-5.4", toggle: true, models: { "gpt-5.4": "medium", "gpt-5.3-codex": "low" }, showIndicator: true },
+    ])("preserves concurrent changes to $name", async ({ secondModel, toggle, models, showIndicator }) => {
+        const config: VerbosityConfig = {
+            showIndicator: false,
+            models: { "gpt-5.4": "low", "gpt-5.3-codex": "low" },
+        };
+        const first = await createRuntime(config);
+        const second = await createRuntime(config);
+        const a = createContext(createModel());
+        const b = createContext(createModel({ id: secondModel }));
+        await first.sessionStartHandler({}, a.ctx);
+        await second.sessionStartHandler({}, b.ctx);
+        try {
+            await Promise.all([
+                first.cycleShortcutHandler(a.ctx),
+                toggle ? second.toggleIndicatorShortcutHandler(b.ctx) : second.cycleShortcutHandler(b.ctx),
+            ]);
+            expect(await loadConfig()).toEqual({ models, showIndicator });
+            expect(a.notifyMock).toHaveBeenLastCalledWith(expect.any(String), "info");
+            expect(b.notifyMock).toHaveBeenLastCalledWith(expect.any(String), "info");
+        } finally {
+            await first.sessionShutdownHandler({}, a.ctx);
+            await second.sessionShutdownHandler({}, b.ctx);
+        }
+    });
+
     it("keeps status and requests in sync across external edits, shortcuts, model changes and shutdown", async () => {
         const runtime = await createRuntime({
             showIndicator: true,

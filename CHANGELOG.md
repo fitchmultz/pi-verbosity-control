@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve concurrent verbosity and indicator changes across Pi sessions by locking the complete read-modify-write operation.
+
 ## 0.4.0 — 22 September 2026
 
 - Publish verbosity through Pi's native extension status, shared by stock and custom footers, instead of patching footer internals.

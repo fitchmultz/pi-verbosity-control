@@ -2,6 +2,7 @@ import { readFileSync, watch, type FSWatcher } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import lockfile from "proper-lockfile";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
@@ -228,6 +229,28 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
         return publishStatus(ctx);
     };
 
+    const updateConfig = async (update: (config: VerbosityConfig) => VerbosityConfig) => {
+        await mkdir(path.dirname(configPath), { recursive: true });
+        const release = await lockfile.lock(configPath, {
+            realpath: false,
+            retries: { retries: 10, minTimeout: 20, maxTimeout: 100 },
+        });
+        try {
+            // Re-read under the cross-process lock so another session's changes survive.
+            let current = activeConfig;
+            try {
+                current = readConfig(configPath);
+            } catch {
+                // Preserve the same last-good fallback used by refresh.
+            }
+            const next = update(current);
+            await saveConfig(next, configPath);
+            return next;
+        } finally {
+            await release();
+        }
+    };
+
     pi.registerShortcut(getCycleShortcut(), {
         description: "Cycle response verbosity for the current model",
         handler: async (ctx) => {
@@ -247,13 +270,12 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
                 return;
             }
 
-            const resolved = resolveConfiguredVerbosity(activeConfig, model);
-            const nextVerbosity = cycleVerbosity(resolved.verbosity);
-            const configKey = resolved.key ?? getExactModelKey(model);
-            const nextConfig = setModelVerbosity(activeConfig, configKey, nextVerbosity);
-
+            let nextConfig: VerbosityConfig;
             try {
-                await saveConfig(nextConfig, configPath);
+                nextConfig = await updateConfig((config) => {
+                    const resolved = resolveConfiguredVerbosity(config, model);
+                    return setModelVerbosity(config, resolved.key ?? getExactModelKey(model), cycleVerbosity(resolved.verbosity));
+                });
             } catch (error) {
                 if (!activeContext) return;
                 const message = error instanceof Error ? error.message : String(error);
@@ -268,7 +290,8 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
             publishStatus(activeContext);
 
             if (ctx.hasUI) {
-                ctx.ui.notify(`Verbosity for ${configKey} → ${nextVerbosity}`, "info");
+                const resolved = resolveConfiguredVerbosity(nextConfig, model);
+                ctx.ui.notify(`Verbosity for ${resolved.key} → ${resolved.verbosity}`, "info");
             }
         },
     });
@@ -277,10 +300,9 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
         description: "Toggle verbosity indicator visibility",
         handler: async (ctx) => {
             refresh(ctx);
-            const nextConfig = setIndicatorVisibility(activeConfig, !activeConfig.showIndicator);
-
+            let nextConfig: VerbosityConfig;
             try {
-                await saveConfig(nextConfig, configPath);
+                nextConfig = await updateConfig((config) => setIndicatorVisibility(config, !config.showIndicator));
             } catch (error) {
                 if (!activeContext) return;
                 const message = error instanceof Error ? error.message : String(error);
