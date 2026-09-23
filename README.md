@@ -33,6 +33,8 @@ Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-
 
 The cycle is `low → medium → high → low`. An unconfigured supported model starts at `low`.
 
+Shortcut saves use a cross-process file lock and re-read the configuration before changing it, preserving concurrent changes from other updated Pi sessions. Manual editors do not participate in this lock.
+
 ## Config
 
 Example `verbosity.json`:
