@@ -136,7 +136,7 @@ export async function saveConfig(config: VerbosityConfig, configPath = getGlobal
         });
         if (previous) await access(targetPath, constants.W_OK);
         await writeFile(stagedPath, `${JSON.stringify(config, null, 4)}\n`, "utf8");
-        if (previous) await chmod(stagedPath, previous.mode & 0o777);
+        if (previous) await chmod(stagedPath, previous.mode & 0o7777);
         await rename(stagedPath, targetPath);
     } finally {
         await rm(stagingDir, { recursive: true, force: true });
