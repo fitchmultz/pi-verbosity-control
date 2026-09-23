@@ -106,8 +106,7 @@ export async function loadConfig(configPath = getGlobalConfigPath()): Promise<Ve
     }
 }
 
-export async function saveConfig(config: VerbosityConfig, configPath = getGlobalConfigPath()): Promise<void> {
-    await mkdir(path.dirname(configPath), { recursive: true });
+async function resolveConfigTarget(configPath: string): Promise<string> {
     let targetPath = configPath;
     while (true) {
         try {
@@ -126,7 +125,12 @@ export async function saveConfig(config: VerbosityConfig, configPath = getGlobal
             break;
         }
     }
-    targetPath = path.join(await realpath(path.dirname(targetPath)), path.basename(targetPath));
+    return path.join(await realpath(path.dirname(targetPath)), path.basename(targetPath));
+}
+
+export async function saveConfig(config: VerbosityConfig, configPath = getGlobalConfigPath()): Promise<void> {
+    await mkdir(path.dirname(configPath), { recursive: true });
+    const targetPath = await resolveConfigTarget(configPath);
     const stagingDir = await mkdtemp(`${targetPath}.`);
     const stagedPath = path.join(stagingDir, "config");
     try {
@@ -263,15 +267,16 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
 
     const updateConfig = async (update: (config: VerbosityConfig) => VerbosityConfig) => {
         await mkdir(path.dirname(configPath), { recursive: true });
-        const release = await lockfile.lock(configPath, {
+        const targetPath = await resolveConfigTarget(configPath);
+        const release = await lockfile.lock(targetPath, {
             realpath: false,
             retries: { retries: 10, minTimeout: 20, maxTimeout: 100 },
         });
         try {
             // Re-read under the cross-process lock so another session's changes survive.
-            const current = readConfig(configPath);
+            const current = readConfig(targetPath);
             const next = update(current);
-            await saveConfig(next, configPath);
+            await saveConfig(next, targetPath);
             return next;
         } finally {
             await release();

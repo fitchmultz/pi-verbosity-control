@@ -661,6 +661,46 @@ describe("pi-verbosity-control runtime", () => {
         }
     });
 
+    it.skipIf(process.platform === "win32")("serializes shortcuts through symlink aliases of one config", async () => {
+        const config: VerbosityConfig = { showIndicator: false, models: { "gpt-5.4": "low" } };
+        const target = path.join(testHome, "shared", "verbosity.json");
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, JSON.stringify(config));
+        const directories = ["first", "second"].map((name) => path.join(testHome, `agent-${name}`));
+        for (const dir of directories) {
+            await mkdir(dir);
+            await symlink(target, path.join(dir, "verbosity.json"));
+        }
+
+        const originalDir = process.env.PI_CODING_AGENT_DIR!;
+        const runtimes = [];
+        try {
+            for (const dir of directories) {
+                process.env.PI_CODING_AGENT_DIR = dir;
+                runtimes.push(await createRuntime(config));
+            }
+        } finally {
+            process.env.PI_CODING_AGENT_DIR = originalDir;
+        }
+        const [first, second] = runtimes;
+        const a = createContext(createModel());
+        const b = createContext(createModel());
+        try {
+            await first.sessionStartHandler({}, a.ctx);
+            await second.sessionStartHandler({}, b.ctx);
+            await Promise.all([first.cycleShortcutHandler(a.ctx), second.cycleShortcutHandler(b.ctx)]);
+            expect(JSON.parse(await readFile(target, "utf8"))).toEqual({
+                showIndicator: false, models: { "gpt-5.4": "high" },
+            });
+            expect([a.notifyMock.mock.lastCall?.[0], b.notifyMock.mock.lastCall?.[0]]).toEqual(
+                expect.arrayContaining(["Verbosity for gpt-5.4 → medium", "Verbosity for gpt-5.4 → high"]),
+            );
+        } finally {
+            await first.sessionShutdownHandler({}, a.ctx);
+            await second.sessionShutdownHandler({}, b.ctx);
+        }
+    });
+
     it.each([
         { name: "different models", secondModel: "gpt-5.3-codex", toggle: false, models: { "gpt-5.4": "medium", "gpt-5.3-codex": "medium" }, showIndicator: false },
         { name: "the same model", secondModel: "gpt-5.4", toggle: false, models: { "gpt-5.4": "high", "gpt-5.3-codex": "low" }, showIndicator: false },
