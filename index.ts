@@ -310,7 +310,9 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
             try {
                 nextConfig = await updateConfig((config) => {
                     const resolved = resolveConfiguredVerbosity(config, model);
-                    return setModelVerbosity(config, resolved.key ?? getExactModelKey(model), cycleVerbosity(resolved.verbosity));
+                    // pi-ai sends low when a Codex request omits verbosity, so cycling must start past it.
+                    const current = resolved.verbosity ?? (model.api === "openai-codex-responses" ? "low" : undefined);
+                    return setModelVerbosity(config, resolved.key ?? getExactModelKey(model), cycleVerbosity(current));
                 });
             } catch (error) {
                 if (!activeContext) return;

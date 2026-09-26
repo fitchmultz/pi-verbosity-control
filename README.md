@@ -31,7 +31,7 @@ Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-
 | Cycle verbosity | `Alt+V` | `Ctrl+Alt+V` |
 | Toggle indicator | `Alt+Shift+V` | `Ctrl+Alt+Shift+V` |
 
-The cycle is `low → medium → high → low`. An unconfigured supported model starts at `low`.
+The cycle is `low → medium → high → low`. An unconfigured supported model starts at `low`. Codex already sends `low` by default, so its first press selects `medium`.
 
 Shortcut saves use a cross-process file lock and re-read the configuration before changing it, preserving concurrent changes from other updated Pi sessions. They replace the file only after a complete write, so failed writes leave the previous config intact. If the file cannot be read or parsed, the shortcut reports an error and leaves it unchanged. Manual editors do not participate in this lock.
 
