@@ -13,6 +13,9 @@ concurrency:
   group: pi-compatibility-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PI_AUTOMATION_REF: fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
+
 jobs:
   compatibility:
     name: compatibility / compatibility
@@ -26,7 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
+          ref: ${{ env.PI_AUTOMATION_REF }}
           path: automation
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
