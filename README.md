@@ -4,7 +4,7 @@ Apply per-model OpenAI `text.verbosity` overrides and cycle the current model's 
 
 ## Install
 
-Install this maintained fork from Git:
+Requires Node.js 24 or newer. Install this maintained fork from Git:
 
 ```bash
 pi install git:github.com/fitchmultz/pi-verbosity-control
@@ -63,7 +63,7 @@ A watcher change invalidates a held receipt before updating active settings. The
 
 ## Tests
 
-Use Node 24 and the repository's pinned official Pi **0.87.0** dependencies:
+Use Node 24 and the repository's pinned official Pi **0.87.1** dependencies. Tests run on Node's built-in test runner:
 
 ```bash
 npm ci --ignore-scripts

@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 26 September 2026
 
+- Require Node.js 24 or newer.
 - Leave OpenAI and Azure GPT-4 and o1/o3/o4 requests unchanged instead of sending unsupported low/high verbosity.
 - Preserve concurrent verbosity and indicator changes across Pi sessions by locking the complete read-modify-write operation.
 - Keep the previous config intact when a shortcut save fails partway through writing.
+- Qualified against official Pi 0.87.1 and the maintained fork.
 
 ## 0.4.0 — 22 September 2026
 

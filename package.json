@@ -1,6 +1,6 @@
 {
     "name": "pi-verbosity-control",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Per-model OpenAI verbosity control for Pi with optional native footer status",
     "keywords": [
         "pi-package",
@@ -16,8 +16,9 @@
         "url": "git+https://github.com/fitchmultz/pi-verbosity-control.git"
     },
     "homepage": "https://github.com/fitchmultz/pi-verbosity-control#readme",
-    "bugs": {
-        "url": "https://github.com/fitchmultz/pi-verbosity-control/issues"
+    "type": "module",
+    "engines": {
+        "node": ">=24.0.0"
     },
     "pi": {
         "extensions": [
@@ -35,18 +36,17 @@
         "@earendil-works/pi-tui": { "optional": true }
     },
     "scripts": {
-        "test": "vitest run --configLoader native",
-        "typecheck": "tsc --noEmit",
+        "test": "node --test index.test.ts",
+        "typecheck": "tsc",
         "check:compat": "npm run typecheck && npm test"
     },
     "devDependencies": {
-        "@earendil-works/pi-ai": "0.87.0",
-        "@earendil-works/pi-coding-agent": "0.87.0",
-        "@earendil-works/pi-tui": "0.87.0",
-        "@types/node": "24.12.4",
+        "@earendil-works/pi-ai": "0.87.1",
+        "@earendil-works/pi-coding-agent": "0.87.1",
+        "@earendil-works/pi-tui": "0.87.1",
+        "@types/node": "24.19.0",
         "@types/proper-lockfile": "4.1.4",
-        "typescript": "5.9.3",
-        "vitest": "4.1.9"
+        "typescript": "7.0.2"
     },
     "dependencies": {
         "proper-lockfile": "4.1.2"
