@@ -10,22 +10,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: pi-compatibility-${{ github.workflow }}-${{ github.ref }}
+  group: pi-compatibility-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  PI_AUTOMATION_REF: 117b227140265329055bcda5927ac170c6301d75 # v1.0.0
 
 jobs:
   compatibility:
     name: compatibility / compatibility
-    runs-on: ubuntu-24.04
-    timeout-minutes: 8
-    env:
-      npm_config_cache: ${{ github.workspace }}/.npm-cache
-      npm_config_audit: 'false'
-      npm_config_fund: 'false'
-      PI_TELEMETRY: '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,97 +26,48 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: ${{ env.PI_AUTOMATION_REF }}
+          ref: fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
           path: automation
-          persist-credentials: false
-      - name: Resolve the pinned fork
-        id: fork
-        shell: bash
-        run: |
-          ref=$(node -p 'require("./automation/host-targets.json").forkRef')
-          [[ "$ref" =~ ^[a-f0-9]{40}$ ]]
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: fitchmultz/pi
-          ref: ${{ steps.fork.outputs.ref }}
-          path: fork
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            extension/package-lock.json
-            fork/package-lock.json
+          check-latest: true
+          package-manager-cache: false
       - name: Use the reviewed npm version
-        shell: bash
+        run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
+      - id: targets
         run: |
-          reviewed=$(node -p 'require("./automation/package.json").packageManager')
-          [[ "npm@$(npm --version)" == "$reviewed" ]] || npm install --global "$reviewed"
-      - name: Install native test prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fd-find ripgrep
-          sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
-      - name: Build the fork host
+          echo "official=$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')" >> "$GITHUB_OUTPUT"
+          echo "fork=$(node -p 'require("./automation/host-targets.json").forkRef')" >> "$GITHUB_OUTPUT"
+      - name: Qualify official Pi
+        run: >
+          node automation/scripts/qualify.mjs --repo pi-verbosity-control
+          --source "$GITHUB_WORKSPACE/extension"
+          --host official --target "${{ steps.targets.outputs.official }}"
+          --output "$RUNNER_TEMP/qualification-official"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/pi
+          ref: ${{ steps.targets.outputs.fork }}
+          path: fork
+          persist-credentials: false
+      - name: Build the reviewed fork package
         working-directory: fork
         env:
-          FORK_REF: ${{ steps.fork.outputs.ref }}
+          PI_OFFLINE: '1'
+          PI_TELEMETRY: '0'
         run: |
           npm ci --ignore-scripts
           npm run hydrate:model-data
-          PI_OFFLINE=1 npm run build:offline
-          node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$FORK_REF"
+          npm run build:offline
+          node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "${{ steps.targets.outputs.fork }}"
           git diff --exit-code
-      - name: Official Pi / Node 24
-        run: |
-          version=$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')
-          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
-            --repo pi-verbosity-control --source "$GITHUB_WORKSPACE/extension" \
-            --host official --target "$version" --output "$RUNNER_TEMP/qualification-official-node24"
-      - name: Fork Pi / Node 24
+      - name: Qualify maintained fork
         env:
-          PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.ref }}
-        run: |
-          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
-            --repo pi-verbosity-control --source "$GITHUB_WORKSPACE/extension" \
-            --host fork --target "$RUNNER_TEMP/fork-package" \
-            --output "$RUNNER_TEMP/qualification-fork-node24"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22.19.0'
-          package-manager-cache: false
-      - name: Use the reviewed npm version on Node 22
-        run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
-      - name: Fork Pi / Node 22.19
-        env:
-          PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.ref }}
-        run: |
-          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
-            --repo pi-verbosity-control --source "$GITHUB_WORKSPACE/extension" \
-            --host fork --target "$RUNNER_TEMP/fork-package" \
-            --output "$RUNNER_TEMP/qualification-fork-node22"
-      - name: Record qualification evidence
-        if: always()
-        shell: bash
-        run: |
-          echo '### Pi compatibility' >> "$GITHUB_STEP_SUMMARY"
-          for report in "$RUNNER_TEMP"/qualification-*/qualification.json; do
-            [[ -f "$report" ]] || continue
-            dir=$(dirname "$report")
-            jq -r '"- \(.flavor) / Node \(.node): \(.result)"' "$report" >> "$GITHUB_STEP_SUMMARY"
-            echo "::group::$(basename "$dir")"
-            jq . "$report"
-            for log in "$dir"/probes/*/stdout.jsonl "$dir"/probes/*/stderr.log; do
-              [[ -s "$log" ]] || continue
-              printf '\n%s\n' "$log"
-              cat "$log"
-            done
-            echo '::endgroup::'
-          done
-          if [[ -f "$RUNNER_TEMP/fork-package/receipt.json" ]]; then
-            echo '::group::fork package receipt'
-            jq . "$RUNNER_TEMP/fork-package/receipt.json"
-            echo '::endgroup::'
-          fi
+          PI_COMPAT_FORK_REF: ${{ steps.targets.outputs.fork }}
+        run: >
+          node automation/scripts/qualify.mjs --repo pi-verbosity-control
+          --source "$GITHUB_WORKSPACE/extension"
+          --host fork --target "$RUNNER_TEMP/fork-package"
+          --output "$RUNNER_TEMP/qualification-fork"
