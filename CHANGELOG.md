@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 — 26 September 2026
+
+- The first verbosity shortcut on an unconfigured Codex model now selects `medium`. Codex already defaults to `low`, so selecting `low` changed nothing.
+
 ## 0.5.0 — 26 September 2026
 
 - Require Node.js 24 or newer.

@@ -898,6 +898,23 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionShutdownHandler({}, ctx);
     });
 
+    for (const { model, expected } of [
+        { model: createModel(), expected: "medium" },
+        { model: createModel({ provider: "openai", api: "openai-responses" }), expected: "low" },
+    ]) {
+        it(`first cycle of unconfigured ${model.provider}/${model.id} changes its effective verbosity to ${expected}`, async () => {
+            const runtime = await createRuntime({ showIndicator: false, models: {} });
+            const ctx = createContext(model);
+            await runtime.sessionStartHandler({}, ctx);
+            try {
+                await runtime.cycleShortcutHandler(ctx);
+                assert.deepEqual(await loadConfig(), { showIndicator: false, models: { [getExactModelKey(model)]: expected } });
+            } finally {
+                await runtime.sessionShutdownHandler({}, ctx);
+            }
+        });
+    }
+
     it("toggles indicator visibility and persists it", async () => {
         const runtime = await createRuntime({
             showIndicator: false,
