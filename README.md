@@ -12,7 +12,7 @@ pi install git:github.com/fitchmultz/pi-verbosity-control
 
 The original [ferologics package](https://github.com/ferologics/pi-verbosity-control) remains available as `npm:pi-verbosity-control`. The Git fork retains its attribution and has its own version history. This repository does not publish the upstream npm package.
 
-Restart Pi after changing extension code or dependencies. On the qualified official and fork 0.87 hosts, `/reload` refreshes settings and non-code resources but does not activate updated extension code.
+On current Pi, `/reload` refreshes extension code. Restart Pi after changing dependencies or when using older hosts that do not replace loaded code.
 
 ## What it does
 
@@ -63,7 +63,7 @@ A watcher change invalidates a held receipt before updating active settings. The
 
 ## Tests
 
-Use Node 24 and the repository's pinned official Pi **0.87.1** dependencies. Tests run on Node's built-in test runner:
+Use Node 24 and the repository's pinned official Pi **0.99.1** dependencies. Tests run on Node's built-in test runner:
 
 ```bash
 npm ci --ignore-scripts
