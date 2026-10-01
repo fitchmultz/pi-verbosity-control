@@ -4,7 +4,7 @@ Apply per-model OpenAI `text.verbosity` overrides and cycle the current model's 
 
 ## Install
 
-Requires Node.js 24 or newer. Install this maintained fork from Git:
+Requires Pi 1.0.0 or newer and Node.js 24 or newer. Install this maintained fork from Git:
 
 ```bash
 pi install git:github.com/fitchmultz/pi-verbosity-control
@@ -12,7 +12,7 @@ pi install git:github.com/fitchmultz/pi-verbosity-control
 
 The original [ferologics package](https://github.com/ferologics/pi-verbosity-control) remains available as `npm:pi-verbosity-control`. The Git fork retains its attribution and has its own version history. This repository does not publish the upstream npm package.
 
-On current Pi, `/reload` refreshes extension code. Restart Pi after changing dependencies or when using older hosts that do not replace loaded code.
+On current Pi, `/reload` refreshes extension code. Start a fresh Pi process after changing dependencies.
 
 ## What it does
 
@@ -55,22 +55,20 @@ The controller owns both the request setting and its displayed status. It watche
 
 The stock footer displays the native status in its extension-status row. Custom footers can read `footerData.getExtensionStatuses().get("verbosity")`; they should not read the config themselves. The extension does not replace or patch any footer. Shutdown and reload clear its status and close its watcher.
 
-## Working-session checkpoints
+## Pi 1.0 lifecycle
 
-On hosts supporting the optional native `session_checkpoint` event, the extension verifies that the existing file reconstructs its active settings before allowing sleep. Checkpointing neither runs shutdown nor rewrites the file. Unreconciled edits, malformed JSON, and read errors prevent sleep readiness. A missing file qualifies only when the active settings are defaults.
-
-A watcher change invalidates a held receipt before updating active settings. The archive owner must still preserve the active agent directory's `verbosity.json` and freeze external filesystem writers during capture. Hosts without checkpoint support retain normal behavior.
+Both supported hosts use the public request/model/session lifecycle. Removed fork checkpoint APIs are not registered; settings remain in `verbosity.json`, with native shutdown cleanup and reload restoration.
 
 ## Tests
 
-Use Node 24 and the repository's pinned official Pi **0.99.1** dependencies. Tests run on Node's built-in test runner:
+Use Node 24 and the repository's pinned official Pi **1.0.0** dependencies. Tests run on Node's built-in test runner:
 
 ```bash
 npm ci --ignore-scripts
 npm run check:compat
 ```
 
-The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. Native checkpoint cases run when the host supports them; `PI_COMPAT_HOST=fork` requires that capability rather than skipping it. A compatibility runner can install maintained-fork artifacts into this checkout before running the same command.
+The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. No removed fork-only APIs are required. A compatibility runner can install maintained-fork artifacts into this checkout before running the same command.
 
 Tests use temporary config directories and synthetic request payloads; they do not contact OpenAI or dispatch terminal keystrokes. To isolate the command environment as well (Bash):
 

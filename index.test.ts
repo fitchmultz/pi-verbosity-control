@@ -318,33 +318,11 @@ function createContext(model: Model<Api>): TestContext {
     return { hasUI: true, model, ui: { notify: mock.fn(), setStatus: mock.fn() } };
 }
 
-// Checkpoints are a fork capability; upstream SDK types do not declare them.
-type SessionCheckpoint = NonNullable<Parameters<typeof sdk.createAgentSession>[0]> extends { checkpoint?: infer C }
-    ? Exclude<C, undefined>
-    : never;
-type CheckpointHold = {
-    sleepReady: boolean;
-    sleepBlockers: unknown[];
-    checkpoint: SessionCheckpoint;
-    signal: AbortSignal;
-    release(): void;
-};
-type CheckpointSession = sdk.AgentSession & {
-    acquireCheckpoint(options: { quiesce: () => () => void; signal?: AbortSignal }): Promise<CheckpointHold>;
-    cancelCheckpoint?(): void;
-    extensionRunner: { checkpointActivity: { run<T>(callback: () => T): T } };
-};
-
-// Optional on older hosts, mandatory in the designated native CI lane.
-const hasCheckpoint = "acquireCheckpoint" in sdk.AgentSession.prototype;
-if ((process.env.PI_COMPAT_HOST === "fork" || process.env.PI_REQUIRE_CHECKPOINT === "1") && !hasCheckpoint) {
-    throw new Error("Fork qualification requires AgentSession.acquireCheckpoint; native tests must not skip");
-}
 const nativeStatuses = new WeakMap<sdk.AgentSession, Map<string, string>>();
 
 // No provider calls: use an empty credential store, disable discovery/network, and
 // invoke the existing request hook with a synthetic payload to observe active state.
-async function start(checkpoint?: SessionCheckpoint): Promise<CheckpointSession> {
+async function start(): Promise<sdk.AgentSession> {
     const cwd = path.join(testHome, "workspace");
     const agentDir = sdk.getAgentDir();
     await mkdir(cwd, { recursive: true });
@@ -360,10 +338,10 @@ async function start(checkpoint?: SessionCheckpoint): Promise<CheckpointSession>
     await resourceLoader.reload();
     assert.deepEqual(resourceLoader.getExtensions().errors, []);
     assert.equal(resourceLoader.getExtensions().extensions.length, 1);
-    const model = createModel({ provider: "checkpoint-test", api: "openai-responses", baseUrl: "http://127.0.0.1:1" });
+    const model = createModel({ provider: "verbosity-test", api: "openai-responses", baseUrl: "http://127.0.0.1:1" });
     const modelsPath = path.join(agentDir, "models.json");
     await mkdir(agentDir, { recursive: true });
-    await writeFile(modelsPath, JSON.stringify({ providers: { "checkpoint-test": {
+    await writeFile(modelsPath, JSON.stringify({ providers: { "verbosity-test": {
         baseUrl: model.baseUrl, api: model.api, apiKey: "synthetic-not-a-credential", models: [model],
     } } }));
     const modelRuntime = await sdk.ModelRuntime.create({
@@ -372,7 +350,7 @@ async function start(checkpoint?: SessionCheckpoint): Promise<CheckpointSession>
     });
     const { session } = await sdk.createAgentSession({
         cwd, agentDir, settingsManager, resourceLoader, modelRuntime,
-        model, tools: [], ...(checkpoint === undefined ? {} : { checkpoint }),
+        model, tools: [],
     });
     const statuses = new Map<string, string>();
     nativeStatuses.set(session, statuses);
@@ -387,33 +365,12 @@ async function start(checkpoint?: SessionCheckpoint): Promise<CheckpointSession>
         },
         onError: (error) => { throw new Error(error.error); },
     });
-    return session as CheckpointSession;
+    return session;
 }
 
-async function close(session: CheckpointSession) {
-    session.cancelCheckpoint?.();
+async function close(session: sdk.AgentSession) {
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();
-}
-
-async function receipt(session: CheckpointSession) {
-    const hold = await session.acquireCheckpoint({
-        quiesce: () => () => {}, signal: AbortSignal.timeout(2000),
-    });
-    try {
-        return { sleepReady: hold.sleepReady, blockers: hold.sleepBlockers, checkpoint: hold.checkpoint };
-    } finally {
-        hold.release();
-    }
-}
-
-async function shortcut(session: CheckpointSession, toggle = false) {
-    const key = process.platform === "darwin"
-        ? (toggle ? "alt+shift+v" : "alt+v")
-        : (toggle ? "ctrl+alt+shift+v" : "ctrl+alt+v");
-    const handler = session.extensionRunner.getShortcuts({}).get(key)!.handler;
-    // Use native callback ownership, as an SDK host must for shortcut dispatch.
-    return session.extensionRunner.checkpointActivity.run(() => handler(session.extensionRunner.createContext()));
 }
 
 async function activeVerbosity(session: sdk.AgentSession) {
@@ -447,10 +404,10 @@ describe("native official/fork baseline", () => {
                 });
                 assert.ok(component.render(width).every((line) => visibleWidth(line) <= width));
             }
-            await session.setModel(createModel({ id: "unsupported", provider: "checkpoint-test", api: "anthropic-messages" }));
+            await session.setModel(createModel({ id: "unsupported", provider: "verbosity-test", api: "anthropic-messages" }));
             assert.equal(nativeStatuses.get(session)?.has("verbosity"), false);
             assert.equal(await activeVerbosity(session), undefined);
-            await session.setModel(createModel({ provider: "checkpoint-test", api: "openai-responses" }));
+            await session.setModel(createModel({ provider: "verbosity-test", api: "openai-responses" }));
             assert.equal(nativeStatuses.get(session)?.get("verbosity"), "🗣  low");
             await saveConfig({ showIndicator: false, models: { "gpt-5.4": "high" } });
             await session.reload();
@@ -459,151 +416,6 @@ describe("native official/fork baseline", () => {
             assert.equal(FooterComponent.prototype.render, originalRender);
         } finally { await close(session); }
         assert.equal(FooterComponent.prototype.render, originalRender);
-    });
-});
-
-describe("native checkpoints", { skip: !hasCheckpoint }, () => {
-    it("qualifies persisted idle state and reconstructs verbosity and indicator from the existing file", async () => {
-        await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
-        const originalRender = FooterComponent.prototype.render;
-        const session = await start();
-        let checkpoint: SessionCheckpoint;
-        try {
-            await shortcut(session);
-            await shortcut(session, true);
-            assert.equal(await activeVerbosity(session), "medium");
-            assert.ok(footer(session).includes("🗣 medium"));
-            const before = await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8");
-            const result = await receipt(session);
-            assert.deepEqual(result.blockers, []);
-            assert.equal(result.sleepReady, true);
-            assert.equal(await readFile(path.join(sdk.getAgentDir(), "verbosity.json"), "utf8"), before);
-            checkpoint = result.checkpoint;
-        } finally { await close(session); }
-        assert.equal(FooterComponent.prototype.render, originalRender);
-        const restored = await start(checkpoint);
-        try {
-            assert.equal(await activeVerbosity(restored), "medium");
-            assert.ok(footer(restored).includes("🗣 medium"));
-            assert.equal((await receipt(restored)).sleepReady, true);
-        } finally { await close(restored); }
-        assert.equal(FooterComponent.prototype.render, originalRender);
-    });
-
-    it("keeps malformed or unreadable config out of active state and blocks sleep", async () => {
-        const config = { showIndicator: true, models: { "gpt-5.4": "high" as const } };
-        await saveConfig(config);
-        const session = await start();
-        const file = path.join(sdk.getAgentDir(), "verbosity.json");
-        try {
-            await writeFile(file, '{"models":');
-            assert.equal(await activeVerbosity(session), "high");
-            assert.equal(nativeStatuses.get(session)?.get("verbosity"), "🗣  high");
-            assert.equal((await receipt(session)).sleepReady, false);
-            assert.equal(await readFile(file, "utf8"), '{"models":');
-            await rm(file);
-            await mkdir(file);
-            assert.equal((await receipt(session)).sleepReady, false);
-            await rm(file, { recursive: true });
-            await saveConfig(config);
-            assert.equal(await activeVerbosity(session), "high");
-            assert.equal((await receipt(session)).sleepReady, true);
-        } finally { await close(session); }
-    });
-
-    it("invalidates a held receipt before applying a changed file snapshot", async () => {
-        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high" } });
-        const session = await start();
-        const hold = await session.acquireCheckpoint({ quiesce: () => () => {} });
-        try {
-            assert.equal(hold.sleepReady, true);
-            // Semantically identical writes must not invalidate a reconstructible receipt.
-            const replacement = path.join(sdk.getAgentDir(), "replacement.json");
-            await writeFile(replacement, '{"models":{"gpt-5.4":"HIGH"},"showIndicator":true}');
-            await rename(replacement, path.join(sdk.getAgentDir(), "verbosity.json"));
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            assert.equal(hold.signal.aborted, false);
-            await saveConfig({ showIndicator: true, models: { "gpt-5.4": "low" } });
-            await waitFor(() => assert.equal(hold.signal.aborted, true));
-            assert.equal(nativeStatuses.get(session)?.get("verbosity"), "🗣  low");
-            assert.equal(await activeVerbosity(session), "low");
-            assert.equal((await receipt(session)).sleepReady, true);
-        } finally { hold.release(); await close(session); }
-    });
-
-    it("accepts missing defaults and semantic equality but not malformed fallback defaults", async () => {
-        const session = await start();
-        const file = path.join(sdk.getAgentDir(), "verbosity.json");
-        try {
-            assert.equal((await receipt(session)).sleepReady, true);
-            await mkdir(path.dirname(file), { recursive: true });
-            await writeFile(file, "{");
-            assert.equal((await receipt(session)).sleepReady, false);
-            await writeFile(file, '{"models": {}, "showIndicator": false, "ignored": true}');
-            assert.equal((await receipt(session)).sleepReady, true);
-        } finally { await close(session); }
-    });
-
-    it("reconciles external edits before sleep and recreates status ownership on reload", async () => {
-        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high", "another-model": "low" } });
-        const originalRender = FooterComponent.prototype.render;
-        const session = await start();
-        const file = path.join(sdk.getAgentDir(), "verbosity.json");
-        try {
-            await writeFile(file, '{"models":{"another-model":"LOW","gpt-5.4":"HIGH"},"showIndicator":true}');
-            assert.equal((await receipt(session)).sleepReady, true);
-            const changed = '{"showIndicator":false,"models":{"gpt-5.4":"low"}}';
-            await writeFile(file, changed);
-            await waitFor(() => assert.equal(nativeStatuses.get(session)?.has("verbosity"), false));
-            assert.equal(await activeVerbosity(session), "low");
-            assert.equal((await receipt(session)).sleepReady, true);
-            await session.reload();
-            assert.equal(await activeVerbosity(session), "low");
-            assert.equal(FooterComponent.prototype.render, originalRender);
-            assert.ok(!footer(session).includes("🗣"));
-            assert.equal((await receipt(session)).sleepReady, true);
-            assert.equal(await readFile(file, "utf8"), changed);
-        } finally { await close(session); }
-    });
-
-    it("keeps failed shortcut writes out of active state and blocks unrecoverable file state", async () => {
-        await saveConfig({ showIndicator: true, models: { "gpt-5.4": "high" } });
-        const session = await start();
-        const file = path.join(sdk.getAgentDir(), "verbosity.json");
-        try {
-            // Keep the fixture transition in one turn: a real deletion would reset settings before EISDIR.
-            rmSync(file);
-            mkdirSync(file); // Real EISDIR failure, not mocked saveConfig.
-            await shortcut(session);
-            await shortcut(session, true);
-            assert.equal(await activeVerbosity(session), "high");
-            assert.ok(footer(session).includes("🗣 high"));
-            assert.equal((await receipt(session)).sleepReady, false);
-        } finally { await close(session); }
-    });
-
-    it("native ownership defers acquisition until the returned callback has finished", async () => {
-        await saveConfig({ showIndicator: false, models: { "gpt-5.4": "low" } });
-        const session = await start();
-        let finish!: () => void;
-        const gate = new Promise<void>((resolve) => { finish = resolve; });
-        const callback = session.extensionRunner.checkpointActivity.run(async () => {
-            await shortcut(session);
-            await gate;
-        });
-        try {
-            const cancel = new AbortController();
-            const pending = session.acquireCheckpoint({ quiesce: () => () => {}, signal: cancel.signal });
-            let acquired = false;
-            void pending.then(() => { acquired = true; }, () => {});
-            await new Promise((resolve) => setTimeout(resolve, 40));
-            assert.equal(acquired, false);
-            cancel.abort();
-            await assert.rejects(pending, /Checkpoint cancelled/);
-            finish();
-            await callback;
-            assert.equal((await receipt(session)).sleepReady, true);
-        } finally { finish(); await callback; await close(session); }
     });
 });
 

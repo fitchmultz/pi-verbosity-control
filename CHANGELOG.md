@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Require and qualify the exact official Pi 1.0.0 development cohort, with the same native payload/status/model-select/shortcut and watched-config behavior. No additional configuration cache or provider override is introduced.
+- Follow the owner's confirmed Pi 1.0 keep list: delete removed fork checkpoint handlers and their checkpoint-only test scaffolding. Preserve config locking, malformed-file recovery, native shutdown cleanup and reload restoration.
+- Continue Git/GitHub-only delivery; do not publish the upstream author's npm package.
+
 ## 0.5.1 — 26 September 2026
 
 - The first verbosity shortcut on an unconfigured Codex model now selects `medium`. Codex already defaults to `low`, so selecting `low` changed nothing.
