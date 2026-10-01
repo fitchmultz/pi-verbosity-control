@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 1 October 2026
 
 - Require and qualify the exact official Pi 1.0.0 development cohort, with the same native payload/status/model-select/shortcut and watched-config behavior. No additional configuration cache or provider override is introduced.
 - Follow the owner's confirmed Pi 1.0 keep list: delete removed fork checkpoint handlers and their checkpoint-only test scaffolding. Preserve config locking, malformed-file recovery, native shutdown cleanup and reload restoration.
