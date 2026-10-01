@@ -243,7 +243,6 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
     const configPath = getGlobalConfigPath();
     let activeContext: ExtensionContext | undefined;
     let watcher: FSWatcher | undefined;
-    let checkpoint: { signal: AbortSignal; invalidate(): void } | undefined;
 
     const publishStatus = (ctx: ExtensionContext) => {
         const model = ctx.model;
@@ -264,7 +263,6 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
         } catch {
             // Keep the last good settings while an editor is writing incomplete JSON.
         }
-        if (checkpoint && !checkpoint.signal.aborted) checkpoint.invalidate();
         activeConfig = nextConfig;
         return publishStatus(ctx);
     };
@@ -381,32 +379,7 @@ export default function piVerbosityControlExtension(pi: ExtensionAPI): void {
         watcher?.close();
         watcher = undefined;
         activeContext = undefined;
-        checkpoint = undefined;
         ctx.ui.setStatus("verbosity", undefined);
-    });
-
-    // Additive native event: older upstream hosts accept the registration but
-    // never emit it. Keep the local signature compatible with their API types.
-    const onCheckpoint = pi.on as unknown as (event: "session_checkpoint", handler: (event: {
-        signal: AbortSignal;
-        invalidate(): void;
-    }) => Promise<{
-        sleepReady: boolean;
-        reason?: string;
-    }>) => unknown;
-    onCheckpoint("session_checkpoint", async (event) => {
-        checkpoint = event;
-        // Native ownership joins shortcuts; the watcher invalidates a held receipt
-        // before accepting a new file snapshot. Never rewrite external edits here.
-        let persisted: VerbosityConfig;
-        try {
-            persisted = readConfig(configPath);
-        } catch {
-            return { sleepReady: false, reason: "Verbosity config could not be read or parsed" };
-        }
-        return isDeepStrictEqual(persisted, activeConfig)
-            ? { sleepReady: true }
-            : { sleepReady: false, reason: "Verbosity config differs from active settings" };
     });
 
     pi.on("before_provider_request", (event, ctx) => {
