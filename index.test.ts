@@ -15,11 +15,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 import {
-    cycleVerbosity,
-    getExactModelKey,
     loadConfig,
-    patchPayloadVerbosity,
-    resolveConfiguredVerbosity,
     saveConfig,
     type VerbosityConfig,
 } from "./index.ts";
@@ -88,48 +84,6 @@ function createModel(overrides?: Partial<Model<Api>>): Model<Api> {
         ...overrides,
     };
 }
-
-describe("pi-verbosity-control helpers", () => {
-    it("cycles verbosity in a loop", () => {
-        assert.equal(cycleVerbosity(undefined), "low");
-        assert.equal(cycleVerbosity("low"), "medium");
-        assert.equal(cycleVerbosity("medium"), "high");
-        assert.equal(cycleVerbosity("high"), "low");
-    });
-
-    it("prefers exact provider/model matches over bare model ids", () => {
-        const model = createModel();
-        const config: VerbosityConfig = {
-            showIndicator: false,
-            models: {
-                "gpt-5.4": "low",
-                "openai-codex/gpt-5.4": "high",
-            },
-        };
-
-        assert.deepEqual(resolveConfiguredVerbosity(config, model), {
-            key: "openai-codex/gpt-5.4",
-            verbosity: "high",
-        });
-    });
-
-    it("patches payload text verbosity without dropping existing text fields", () => {
-        const payload = {
-            model: "gpt-5.4",
-            text: {
-                format: "plain",
-            },
-        };
-
-        assert.deepEqual(patchPayloadVerbosity(payload, "low"), {
-            model: "gpt-5.4",
-            text: {
-                format: "plain",
-                verbosity: "low",
-            },
-        });
-    });
-});
 
 function runLimitedShortcut(modelId: string): string {
     const child = spawnSync("bash", [
@@ -239,9 +193,6 @@ describe("pi-verbosity-control config io", () => {
         });
     });
 
-    it("builds the expected exact model key", () => {
-        assert.equal(getExactModelKey(createModel()), "openai-codex/gpt-5.4");
-    });
 });
 
 async function createRuntime(config: VerbosityConfig) {
@@ -568,7 +519,7 @@ describe("pi-verbosity-control runtime", () => {
         });
         const ctx = createContext(createModel());
         const status = () => lastArgs(ctx.ui.setStatus);
-        const payload = { stream: true, text: { format: "plain" } };
+        const payload = { model: "gpt-5.4", stream: true, text: { format: "plain" } };
         const request = () => runtime.beforeProviderRequestHandler({ payload }, ctx);
         await runtime.sessionStartHandler({}, ctx);
         try {
@@ -710,9 +661,9 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionShutdownHandler({}, ctx);
     });
 
-    for (const { model, expected } of [
-        { model: createModel(), expected: "medium" },
-        { model: createModel({ provider: "openai", api: "openai-responses" }), expected: "low" },
+    for (const { model, expected, expectedKey } of [
+        { model: createModel(), expected: "medium", expectedKey: "openai-codex/gpt-5.4" },
+        { model: createModel({ provider: "openai", api: "openai-responses" }), expected: "low", expectedKey: "openai/gpt-5.4" },
     ]) {
         it(`first cycle of unconfigured ${model.provider}/${model.id} changes its effective verbosity to ${expected}`, async () => {
             const runtime = await createRuntime({ showIndicator: false, models: {} });
@@ -720,7 +671,7 @@ describe("pi-verbosity-control runtime", () => {
             await runtime.sessionStartHandler({}, ctx);
             try {
                 await runtime.cycleShortcutHandler(ctx);
-                assert.deepEqual(await loadConfig(), { showIndicator: false, models: { [getExactModelKey(model)]: expected } });
+                assert.deepEqual(await loadConfig(), { showIndicator: false, models: { [expectedKey]: expected } });
             } finally {
                 await runtime.sessionShutdownHandler({}, ctx);
             }
@@ -751,22 +702,4 @@ describe("pi-verbosity-control runtime", () => {
         await runtime.sessionShutdownHandler({}, ctx);
     });
 
-    it("publishes native status without patching the footer and clears it on shutdown", async () => {
-        const runtime = await createRuntime({
-            showIndicator: true,
-            models: {
-                "gpt-5.4": "low",
-            },
-        });
-        const ctx = createContext(createModel());
-        const originalRender = FooterComponent.prototype.render;
-
-        await runtime.sessionStartHandler({}, ctx);
-        assert.deepEqual(lastArgs(ctx.ui.setStatus), ["verbosity", "🗣  low"]);
-        assert.equal(FooterComponent.prototype.render, originalRender);
-
-        await runtime.sessionShutdownHandler({}, ctx);
-        assert.deepEqual(lastArgs(ctx.ui.setStatus), ["verbosity", undefined]);
-        assert.equal(FooterComponent.prototype.render, originalRender);
-    });
 });

@@ -149,7 +149,7 @@ export async function saveConfig(config: VerbosityConfig, configPath = getGlobal
     }
 }
 
-export function getExactModelKey(model: Pick<Model<Api>, "provider" | "id">): string {
+function getExactModelKey(model: Pick<Model<Api>, "provider" | "id">): string {
     return `${model.provider}/${model.id}`;
 }
 
@@ -163,7 +163,7 @@ export function supportsVerbosityControl(model: Pick<Model<Api>, "api" | "provid
         && !(officialOpenAI && LEGACY_OPENAI_MODELS.test(model.id));
 }
 
-export function resolveConfiguredVerbosity(
+function resolveConfiguredVerbosity(
     config: VerbosityConfig,
     model: Pick<Model<Api>, "provider" | "id">,
 ): { key?: string; verbosity?: Verbosity } {
@@ -181,7 +181,7 @@ export function resolveConfiguredVerbosity(
     return {};
 }
 
-export function cycleVerbosity(current: Verbosity | undefined): Verbosity {
+function cycleVerbosity(current: Verbosity | undefined): Verbosity {
     switch (current) {
         case "low":
             return "medium";
@@ -211,7 +211,7 @@ export function setIndicatorVisibility(config: VerbosityConfig, showIndicator: b
     };
 }
 
-export function patchPayloadVerbosity(payload: unknown, verbosity: Verbosity): unknown {
+function patchPayloadVerbosity(payload: unknown, verbosity: Verbosity): unknown {
     if (!isObject(payload)) {
         return payload;
     }
