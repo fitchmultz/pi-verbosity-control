@@ -5,23 +5,46 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      official-version:
+        description: Official stable version resolved for this run; blank resolves latest
+        type: string
+        default: ''
+      fork-ref:
+        description: Maintained fork commit resolved for this run; blank resolves main
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: pi-compatibility-${{ github.ref }}
+  group: pi-compatibility-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: a0fdc5780053237ac4ee24f49976ee5449e3aaab # v1.0.1
+  PI_AUTOMATION_REF: 6ec8741e1d5c7097e9b1f108bb698f5c5cd5d7f5 # main
 
 jobs:
+  resolve:
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@6ec8741e1d5c7097e9b1f108bb698f5c5cd5d7f5 # main
+    with:
+      automation-ref: 6ec8741e1d5c7097e9b1f108bb698f5c5cd5d7f5 # main
+      official-version: ${{ inputs.official-version }}
+      fork-ref: ${{ inputs.fork-ref }}
+
   compatibility:
+    needs: resolve
+    if: ${{ !cancelled() }}
     name: compatibility / compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Require resolved latest hosts
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: extension
@@ -39,32 +62,33 @@ jobs:
           package-manager-cache: false
       - name: Use the reviewed npm version
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
-      - id: targets
-        run: |
-          echo "official=$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')" >> "$GITHUB_OUTPUT"
       - name: Qualify official Pi
+        env:
+          OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
         run: >
           node automation/scripts/qualify.mjs --repo pi-verbosity-control
           --source "$GITHUB_WORKSPACE/extension"
-          --host official --target "${{ steps.targets.outputs.official }}"
+          --host official --target "$OFFICIAL_VERSION"
           --output "$RUNNER_TEMP/qualification-official"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         id: fork
         with:
           repository: fitchmultz/pi
-          ref: main
+          ref: ${{ needs.resolve.outputs.fork-ref }}
           path: fork
           persist-credentials: false
-      - name: Build the current fork package
+      - name: Build the frozen fork package
         working-directory: fork
         env:
+          FORK_REF: ${{ steps.fork.outputs.commit }}
           PI_OFFLINE: '1'
           PI_TELEMETRY: '0'
         run: |
-          npm ci --ignore-scripts
+          npm ci --ignore-scripts --no-audit --no-fund
           npm run hydrate:model-data
+          git diff --exit-code
           npm run build:offline
-          node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "${{ steps.fork.outputs.commit }}"
+          node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$FORK_REF"
           git diff --exit-code
       - name: Qualify maintained fork
         env:
@@ -74,3 +98,13 @@ jobs:
           --source "$GITHUB_WORKSPACE/extension"
           --host fork --target "$RUNNER_TEMP/fork-package"
           --output "$RUNNER_TEMP/qualification-fork"
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-qualification
+          path: |
+            ${{ runner.temp }}/qualification-official
+            ${{ runner.temp }}/qualification-fork
+          if-no-files-found: error
+          retention-days: 3
