@@ -1,6 +1,14 @@
 {
-    "name": "pi-verbosity-control",
-    "version": "0.6.0",
+    "name": "@fitchmultz/pi-verbosity-control",
+    "version": "0.6.1",
+    "publishConfig": {
+        "access": "public"
+    },
+    "files": [
+        "index.ts",
+        "README.md",
+        "CHANGELOG.md"
+    ],
     "description": "Per-model OpenAI verbosity control for Pi with optional native footer status",
     "keywords": [
         "pi-package",

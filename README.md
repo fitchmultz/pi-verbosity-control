@@ -4,13 +4,21 @@ Apply per-model OpenAI `text.verbosity` overrides and cycle the current model's 
 
 ## Install
 
-Requires Pi 1.0.0 or newer and Node.js 24 or newer. Install this maintained fork from Git:
+Requires Pi 1.0.0 or newer and Node.js 24 or newer. Install this maintained fork from its owned npm scope:
+
+```bash
+pi install npm:@fitchmultz/pi-verbosity-control
+```
+
+**The unscoped npm package `pi-verbosity-control` is NOT this project.** It belongs to the original [ferologics project](https://github.com/ferologics/pi-verbosity-control). This maintained fork retains its attribution and version history, and publishes only `@fitchmultz/pi-verbosity-control`.
+
+Git remains supported, including existing tags and commits:
 
 ```bash
 pi install git:github.com/fitchmultz/pi-verbosity-control
 ```
 
-The original [ferologics package](https://github.com/ferologics/pi-verbosity-control) remains available as `npm:pi-verbosity-control`. The Git fork retains its attribution and has its own version history. This repository does not publish the upstream npm package.
+When switching an existing Git installation to npm, replace its package source instead of loading both copies; keep any resource filters. Both sources use the same active agent directory and `verbosity.json`; no configuration migration is needed.
 
 On current Pi, `/reload` refreshes extension code. Start a fresh Pi process after changing dependencies.
 
@@ -61,14 +69,14 @@ Both supported hosts use the public request/model/session lifecycle. Removed for
 
 ## Tests
 
-Use Node 24 and the repository's pinned official Pi **1.0.0** dependencies. Tests run on Node's built-in test runner:
+Use Node 24. Tests run on Node's built-in test runner:
 
 ```bash
 npm ci --ignore-scripts
 npm run check:compat
 ```
 
-The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. No removed fork-only APIs are required. A compatibility runner can install maintained-fork artifacts into this checkout before running the same command.
+The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. No removed fork-only APIs are required. `npm ci` uses the locked development snapshot; release qualification instead resolves the latest stable official Pi and maintained fork main once per run, freezes their version/SHA, and installs each complete SDK cohort before running the same command.
 
 Tests use temporary config directories and synthetic request payloads; they do not contact OpenAI or dispatch terminal keystrokes. To isolate the command environment as well (Bash):
 
@@ -81,3 +89,7 @@ env -i PATH="$PATH" HOME="$fixture/home" USERPROFILE="$fixture/home" \
     PI_OFFLINE=1 PI_TELEMETRY=0 PI_COMPAT_HOST=official \
     npm run check:compat
 ```
+
+## Releases
+
+An intentional stable version bump and nonempty versioned changelog entry on reviewed `main` drive this repository's `npm-release.yml` pipeline. Publishing is disabled unless `NPM_RELEASE_ENABLED` is `true`. Its plan freezes the latest official version and fork SHA, then requires both-host compatibility and package/install checks to pass before publishing the owned public scoped package. The upstream unscoped package is never a publication target.

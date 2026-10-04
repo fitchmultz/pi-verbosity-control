@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 — 4 October 2026
+
+- Distribute this maintained fork as the public scoped package `@fitchmultz/pi-verbosity-control`, with a runtime-only package allowlist and scoped-first installation guidance. Preserve upstream attribution, existing Git installs and the `verbosity.json` configuration contract.
+- Qualify the once-resolved latest stable official Pi and maintained fork main, including the existing native request/status/model/reload and configuration checks, before publishing from this repository's main-only release pipeline.
+
 ## 0.6.0 — 1 October 2026
 
 - Require and qualify the exact official Pi 1.0.0 development cohort, with the same native payload/status/model-select/shortcut and watched-config behavior. No additional configuration cache or provider override is introduced.
@@ -24,4 +29,4 @@
 - Use the active Pi agent directory and one configuration snapshot for request overrides and the indicator. Follow file edits, model changes, and existing shortcuts; release the watcher and status on shutdown.
 - Preserve native checkpoint behavior and invalidate held receipts before accepting changed settings.
 
-This maintained fork is distributed through Git. It does not publish the upstream npm package.
+This maintained fork is distributed as `@fitchmultz/pi-verbosity-control` and through Git. It does not publish the upstream unscoped npm package.
