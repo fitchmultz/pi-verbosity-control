@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 — 31 October 2026
+
+- Refresh the release and host-qualification workflows and clarify compatibility and the scoped npm and GitHub release process.
+
 ## 0.6.1 — 4 October 2026
 
 - Distribute this maintained fork as the public scoped package `@fitchmultz/pi-verbosity-control`, with a runtime-only package allowlist and scoped-first installation guidance. Preserve upstream attribution, existing Git installs and the `verbosity.json` configuration contract.
