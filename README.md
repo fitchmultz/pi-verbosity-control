@@ -4,7 +4,7 @@ Apply per-model OpenAI `text.verbosity` overrides and cycle the current model's 
 
 ## Install
 
-Requires Pi 1.0.0 or newer and Node.js 24 or newer. Install this maintained fork from its owned npm scope:
+Requires Node.js and a supported Pi release. See the [compatibility requirements](https://github.com/fitchmultz/pi-verbosity-control/blob/main/docs/compatibility.md). Install this maintained fork from its owned npm scope:
 
 ```bash
 pi install npm:@fitchmultz/pi-verbosity-control
@@ -63,13 +63,13 @@ The controller owns both the request setting and its displayed status. It watche
 
 The stock footer displays the native status in its extension-status row. Custom footers can read `footerData.getExtensionStatuses().get("verbosity")`; they should not read the config themselves. The extension does not replace or patch any footer. Shutdown and reload clear its status and close its watcher.
 
-## Pi 1.0 lifecycle
+## Pi lifecycle
 
 Both supported hosts use the public request/model/session lifecycle. Removed fork checkpoint APIs are not registered; settings remain in `verbosity.json`, with native shutdown cleanup and reload restoration.
 
 ## Tests
 
-Use Node 24. Tests run on Node's built-in test runner:
+Tests run on Node's built-in test runner:
 
 ```bash
 npm ci --ignore-scripts
@@ -92,4 +92,4 @@ env -i PATH="$PATH" HOME="$fixture/home" USERPROFILE="$fixture/home" \
 
 ## Releases
 
-An intentional stable version bump and nonempty versioned changelog entry on reviewed `main` drive this repository's `npm-release.yml` pipeline. Publishing is disabled unless `NPM_RELEASE_ENABLED` is `true`. Its plan freezes the latest official version and fork SHA, then requires both-host compatibility and package/install checks to pass before publishing the owned public scoped package. The upstream unscoped package is never a publication target.
+This repository's main-only `npm-release.yml` pipeline publishes matching npm and GitHub releases. Publishing is disabled unless `NPM_RELEASE_ENABLED` is `true`. The plan freezes the latest official version and fork SHA, then requires both-host compatibility and package/install checks to pass before publishing the owned public scoped package. The upstream unscoped package is never a publication target.
