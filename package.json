@@ -1,6 +1,6 @@
 {
     "name": "@fitchmultz/pi-verbosity-control",
-    "version": "0.6.3",
+    "version": "0.6.4",
     "publishConfig": {
         "access": "public"
     },
