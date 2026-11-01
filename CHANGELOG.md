@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.3 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Automate reviewed npm patch releases (#36) ([10fcbc0](https://github.com/fitchmultz/pi-verbosity-control/commit/10fcbc09a54f270414a924515bc9625ab6c1a9d6))
+
+### What's Changed
+* Automate reviewed npm patch releases by @fitchmultz in https://github.com/fitchmultz/pi-verbosity-control/pull/36
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-verbosity-control/compare/v0.6.2...v0.6.3
+
 ## 0.6.2 — 31 October 2026
 
 - Refresh the release and host-qualification workflows and clarify compatibility and the scoped npm and GitHub release process.
