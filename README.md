@@ -92,4 +92,4 @@ env -i PATH="$PATH" HOME="$fixture/home" USERPROFILE="$fixture/home" \
 
 ## Releases
 
-This repository's main-only `npm-release.yml` pipeline publishes matching npm and GitHub releases. Publishing is disabled unless `NPM_RELEASE_ENABLED` is `true`. The plan freezes the latest official version and fork SHA, then requires both-host compatibility and package/install checks to pass before publishing the owned public scoped package. The upstream unscoped package is never a publication target.
+When `NPM_RELEASE_ENABLED` is `true`, each main merge enters the automatic version queue. Its version PR must pass current-head compatibility and reviews before the main-only pipeline publishes matching npm and GitHub releases. The plan freezes the latest official version and fork SHA and requires both-host compatibility and package/install checks. The upstream unscoped package is never a publication target.
