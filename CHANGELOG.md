@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.4 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Use direct Flash for automatic release remediation (#38) ([c02de8b](https://github.com/fitchmultz/pi-verbosity-control/commit/c02de8bf3d105b9988c345fabe09271b667a80c5))
+
+### What's Changed
+* Use direct Flash for necessary release remediation by @fitchmultz in https://github.com/fitchmultz/pi-verbosity-control/pull/38
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-verbosity-control/compare/v0.6.3...v0.6.4
+
 ## 0.6.3 - 2026-11-01
 
 <!-- npm-release:unreleased:start -->
