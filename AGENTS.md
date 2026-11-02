@@ -1,5 +1,10 @@
 # Project instructions
 
+## Engineering standard
+
+- This repository follows the Strict Oxlint and Oxfmt Engineering Standard v5.1.2; the adopted copy is `docs/quality/strict-oxlint-oxfmt-5.1.2.md` and the adoption record is `docs/quality/adoption.md`. `.oxlintrc.json` and `.oxfmtrc.json` carry that configuration, `docs/quality/quality-exceptions.md` holds the recorded exceptions (QX-001 allowance, QX-002 directive inventory, QX-003 formatting mapping), and `npm run policy:check` fails when the effective configuration, tool floors, source coverage, or the authorized directive inventory drifts. Rule and option changes are policy decisions.
+- `npm run check` is the pre-push gate: policy conformance, format check, lint (type-aware), typecheck, tests, and pack check. Gates run independently through `scripts/run-gates.ts`, so one failure cannot hide another. Findings are fixed in code; the repository keeps only the recorded lint-disable directives and zero TypeScript suppression comments. Test diagnostic fixtures live under `tests/probes/` and are enforced by `npm run quality:probes`, never by suppression.
+
 ## Dependency maintenance
 
 - Frequently and proactively check releases and make appropriate upgrades across maintained packages and all runtime, development, build, test, and tool dependencies, prioritizing the latest stable official Pi and the intended maintained Pi fork. Routine in-scope maintenance needs no repeated approval; delivery remains subject to existing authority and gates.
