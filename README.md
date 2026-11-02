@@ -34,9 +34,9 @@ Supported APIs: `openai-responses`, `openai-codex-responses`, and `azure-openai-
 
 ## Shortcuts
 
-| Action | macOS | Other platforms |
-| --- | --- | --- |
-| Cycle verbosity | `Alt+V` | `Ctrl+Alt+V` |
+| Action           | macOS         | Other platforms    |
+| ---------------- | ------------- | ------------------ |
+| Cycle verbosity  | `Alt+V`       | `Ctrl+Alt+V`       |
 | Toggle indicator | `Alt+Shift+V` | `Ctrl+Alt+Shift+V` |
 
 The cycle is `low → medium → high → low`. An unconfigured supported model starts at `low`. Codex already sends `low` by default, so its first press selects `medium`.
@@ -69,14 +69,18 @@ Both supported hosts use the public request/model/session lifecycle. Removed for
 
 ## Tests
 
-Tests run on Node's built-in test runner:
+Acceptance runs every gate independently through `scripts/run-gates.ts`, so one failure cannot hide another:
 
 ```bash
 npm ci --ignore-scripts
 npm run check:compat
 ```
 
-The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. No removed fork-only APIs are required. `npm ci` uses the locked development snapshot; release qualification instead resolves the latest stable official Pi and maintained fork main once per run, freezes their version/SHA, and installs each complete SDK cohort before running the same command.
+`check:compat` runs policy conformance (`policy:check`), the format check (`format:check`), type-aware lint (`lint`, Oxlint through oxlint-tsgolint), the compiler (`typecheck`), and the test suite. `npm run check` adds the package (`pack:check`) gate for local pre-push runs. The suite covers config normalization, a nondefault agent directory, model precedence and API eligibility, shortcuts, shared request/status updates, watcher cleanup, and native extension loading, stock-footer rendering, model selection, and reload. No removed fork-only APIs are required.
+
+The repository follows the [Strict Oxlint and Oxfmt Engineering Standard v5.1.2](docs/quality/strict-oxlint-oxfmt-5.1.2.md); the adoption record and recorded exceptions live in `docs/quality/`, and the qualification harness (`npm run quality:probes`) exercises the lint configuration's protections and exception boundaries through the committed diagnostic fixtures in `tests/probes/`.
+
+`npm ci` uses the locked development snapshot; release qualification instead resolves the latest stable official Pi and maintained fork main once per run, freezes their version/SHA, and installs each complete SDK cohort before running the same command.
 
 Tests use temporary config directories and synthetic request payloads; they do not contact OpenAI or dispatch terminal keystrokes. To isolate the command environment as well (Bash):
 
