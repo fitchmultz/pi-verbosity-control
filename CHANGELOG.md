@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.5 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Adopt the Strict Oxlint and Oxfmt Engineering Standard v5.1.2 (#40) ([702829a](https://github.com/fitchmultz/pi-verbosity-control/commit/702829aeb5cc44a5e51034a0e4f17da2b8033783))
+
+### What's Changed
+* Adopt the Strict Oxlint and Oxfmt Engineering Standard v5.1.2 by @fitchmultz in https://github.com/fitchmultz/pi-verbosity-control/pull/40
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-verbosity-control/compare/v0.6.4...v0.6.5
+
 ## 0.6.4 - 2026-11-01
 
 <!-- npm-release:unreleased:start -->
