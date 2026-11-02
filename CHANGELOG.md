@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.7 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Recheck unreported Cursor reviews in automatic releases (#44) ([5467fe7](https://github.com/fitchmultz/pi-verbosity-control/commit/5467fe7af8795e0d08ed6064b04071c4795f49ca))
+
+### What's Changed
+* Recheck unreported Cursor reviews in automatic releases by @fitchmultz in https://github.com/fitchmultz/pi-verbosity-control/pull/44
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-verbosity-control/compare/v0.6.6...v0.6.7
+
 ## 0.6.6 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->
