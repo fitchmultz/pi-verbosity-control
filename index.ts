@@ -223,12 +223,12 @@ function resolveConfiguredVerbosity(
     model: Pick<Model<Api>, "provider" | "id">,
 ): { key?: string; verbosity?: Verbosity } {
     const exactKey = getExactModelKey(model);
-    const exactVerbosity = config.models[exactKey];
+    const exactVerbosity = normalizeVerbosity(config.models[exactKey]);
     if (exactVerbosity !== undefined) {
         return { key: exactKey, verbosity: exactVerbosity };
     }
 
-    const sharedVerbosity = config.models[model.id];
+    const sharedVerbosity = normalizeVerbosity(config.models[model.id]);
     if (sharedVerbosity !== undefined) {
         return { key: model.id, verbosity: sharedVerbosity };
     }

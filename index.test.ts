@@ -938,6 +938,15 @@ nodeDescribe("pi-verbosity-control runtime", () => {
             expected: "low",
             expectedKey: "openai/gpt-5.4",
         },
+        {
+            model: createModel({
+                provider: "openai",
+                id: "constructor",
+                api: "openai-responses",
+            }),
+            expected: "low",
+            expectedKey: "openai/constructor",
+        },
     ]) {
         nodeIt(
             `first cycle of unconfigured ${model.provider}/${model.id} changes its effective verbosity to ${expected}`,
@@ -951,6 +960,10 @@ nodeDescribe("pi-verbosity-control runtime", () => {
                         showIndicator: false,
                         models: { [expectedKey]: expected },
                     });
+                    assert.deepEqual(lastArgs(ctx.ui.notify), [
+                        `Verbosity for ${expectedKey} → ${expected}`,
+                        "info",
+                    ]);
                 } finally {
                     await runtime.sessionShutdownHandler({}, ctx);
                 }
