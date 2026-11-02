@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.6 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Raise the Pi floor to 1.5.0 (#42) ([53968a8](https://github.com/fitchmultz/pi-verbosity-control/commit/53968a8f3ed94a65802bc99e045750efef35c86d))
+
+### What's Changed
+* Raise the Pi floor to 1.5.0 by @fitchmultz in https://github.com/fitchmultz/pi-verbosity-control/pull/42
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-verbosity-control/compare/v0.6.5...v0.6.6
+
 ## 0.6.5 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->
