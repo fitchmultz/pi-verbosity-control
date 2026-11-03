@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.8 - 2026-11-03
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Skip no-op releases and restate malformed remediation dispositions (#47) ([6d94d59](https://github.com/fitchmultz/pi-verbosity-control/commit/6d94d59d44320baf94c14c674c597e3752b14435))
+
+### What's Changed
+* Skip no-op releases and restate malformed remediation dispositions by @fitchmultz in https://github.com/fitchmultz/pi-verbosity-control/pull/47
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-verbosity-control/compare/v0.6.7...v0.6.8
+
 ## 0.6.7 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->
